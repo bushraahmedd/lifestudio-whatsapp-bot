@@ -1,7 +1,7 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 const config = require("../config");
-const { updateBotStatus, logWhatsAppEvent } = require("../firestore/botState");
+const { updateBotStatus, logWhatsAppEvent, getBotConfig } = require("../firestore/botState");
 
 /**
  * @param {function} onIncomingMessage
@@ -25,7 +25,19 @@ function createWebJsProvider(onIncomingMessage) {
   }
 
   async function notifyOwner(text) {
-    await sendText(phoneToChatId(config.ownerPhone), text);
+    const botConfig = await getBotConfig();
+    const phones = [...new Set(
+      [config.ownerPhone, botConfig.ownerPhone, ...(botConfig.bossPhones || [])]
+        .map((p) => (p || "").replace(/\D/g, ""))
+        .filter(Boolean)
+    )];
+    for (const phone of phones) {
+      try {
+        await sendText(phoneToChatId(phone), text);
+      } catch (err) {
+        console.error("[webjs] notify boss failed:", phone, err.message);
+      }
+    }
   }
 
   function getConnectionState() {

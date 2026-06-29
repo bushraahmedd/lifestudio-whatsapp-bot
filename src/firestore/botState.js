@@ -45,16 +45,21 @@ async function getBotConfig() {
   const snap = await db.doc("bot_config/settings").get();
   const defaults = {
     ownerPhone: config.ownerPhone,
+    bossPhones: config.bossPhones.length ? config.bossPhones : [config.ownerPhone],
     bank: config.bank,
+    feesNote: "الأسعار الرسمية قريباً — الحجز حسب الباقات الحالية.",
     defaultPhotographerIds: [],
     packages: [
       { id: "wedding", label: "زفاف", price: 2500 },
       { id: "portrait", label: "بورتريه", price: 800 },
       { id: "event", label: "مناسبة", price: 1500 },
     ],
-    greeting: "مرحباً بك في *لايف استوديو* للتصوير 📸",
+    greeting: "أهلاً بيك في *لايف استوديو* للتصوير 📸",
   };
-  return snap.exists ? { ...defaults, ...snap.data() } : defaults;
+  const data = snap.exists ? { ...defaults, ...snap.data() } : defaults;
+  if (!data.bossPhones?.length) data.bossPhones = [data.ownerPhone || config.ownerPhone];
+  if (data.bank && config.bank.iban && !data.bank.iban) data.bank.iban = config.bank.iban;
+  return data;
 }
 
 async function logWhatsAppEvent({ chatId, phone, direction, message, meta = {} }) {

@@ -7,7 +7,7 @@ const {
 const qrcode = require("qrcode");
 const pino = require("pino");
 const config = require("../config");
-const { updateBotStatus, logWhatsAppEvent } = require("../firestore/botState");
+const { updateBotStatus, logWhatsAppEvent, getBotConfig } = require("../firestore/botState");
 
 function extractMessageText(msg) {
   const m = msg.message;
@@ -52,7 +52,19 @@ function createBaileysProvider(onIncomingMessage) {
   }
 
   async function notifyOwner(text) {
-    await sendText(phoneToChatId(config.ownerPhone), text);
+    const botConfig = await getBotConfig();
+    const phones = [...new Set(
+      [config.ownerPhone, botConfig.ownerPhone, ...(botConfig.bossPhones || [])]
+        .map((p) => (p || "").replace(/\D/g, ""))
+        .filter(Boolean)
+    )];
+    for (const phone of phones) {
+      try {
+        await sendText(phoneToChatId(phone), text);
+      } catch (err) {
+        console.error("[baileys] notify boss failed:", phone, err.message);
+      }
+    }
   }
 
   function getConnectionState() {

@@ -1,5 +1,6 @@
 const { db, FieldValue } = require("../firebase/admin");
 const { getDefaultPhotographerIds } = require("./photographers");
+const { upsertClientFromSession } = require("./clients");
 
 const ACTIVE_STATUSES = ["tentative", "in_progress", "completed"];
 
@@ -17,6 +18,7 @@ async function createTentativeSession({
   packageLabel,
   note,
   photographerIds,
+  paymentMethod,
 }) {
   const defaultIds = photographerIds?.length ? photographerIds : await getDefaultPhotographerIds();
   const doc = {
@@ -31,6 +33,7 @@ async function createTentativeSession({
     bookingSource: "whatsapp",
     sessionType: sessionType || "general",
     packageLabel: packageLabel || "",
+    paymentMethod: paymentMethod || "كاش",
     createdAt: FieldValue.serverTimestamp(),
     confirmedBy: [],
     declinedBy: [],
@@ -39,7 +42,22 @@ async function createTentativeSession({
     notifiedPhotographers: [],
   };
   const ref = await db.collection("sessions").add(doc);
-  return { id: ref.id, ...doc };
+  const session = { id: ref.id, ...doc };
+  await upsertClientFromSession({
+    clientName,
+    clientPhone,
+    date,
+    location: doc.location,
+    sessionId: ref.id,
+    source: "whatsapp",
+  });
+  await db.collection("logs").add({
+    action: `حجز واتساب جديد: ${clientName} — ${date} ${time}`,
+    adminName: "بوت واتساب",
+    timestamp: new Date().toLocaleString("ar-LY"),
+    createdAt: FieldValue.serverTimestamp(),
+  });
+  return session;
 }
 
 async function assignPhotographersAndConfirm(sessionId, photographerIds) {

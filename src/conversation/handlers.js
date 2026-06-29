@@ -1,4 +1,5 @@
 const { STATES, MAIN_MENU_TEXT, normalizeInput, isBack } = require("./stateMachine");
+const { FEES_NOTE_DEFAULT, formatBankTransfer } = require("./messages");
 const { getAvailability, isSlotAvailable } = require("../firestore/availability");
 const {
   createTentativeSession,
@@ -22,6 +23,11 @@ const {
   logWhatsAppEvent,
 } = require("../firestore/botState");
 const config = require("../config");
+
+function isYes(text) {
+  const t = normalizeInput(text);
+  return ["نعم", "أيوه", "ايوه", "ايه", "أيه", "yes", "ok", "تأكيد", "1"].includes(t);
+}
 
 /**
  * @param {object} ctx
@@ -72,6 +78,8 @@ async function handleIncomingMessage(ctx) {
         return handleBookLocation(ctx, text, data);
       case STATES.BOOK_PAYMENT_TYPE:
         return handleBookPaymentType(ctx, text, data);
+      case STATES.BOOK_PAY_CHANNEL:
+        return handleBookPayChannel(ctx, text, data);
       case STATES.BOOK_CONFIRM:
         return handleBookConfirm(ctx, text, data, notifyOwner);
       case STATES.CANCEL_PICK:
@@ -99,7 +107,7 @@ async function handleIncomingMessage(ctx) {
     }
   } catch (err) {
     console.error("Handler error:", err);
-    await send("⚠️ حدث خطأ مؤقت. أرسل *0* للعودة للقائمة الرئيسية.");
+    await send("⚠️ صار خطأ بسيط. ابعث *0* وارجع للقائمة.");
   }
 }
 
@@ -110,11 +118,11 @@ async function handleMainMenu(ctx, text, data) {
   if (choice === "1") {
     const days = await getAvailability();
     if (!days.length) {
-      await send("عذراً، لا توجد مواعيد متاحة حالياً. تواصل مع الاستوديو مباشرة.");
+      await send("معذرة، ما فيش مواعيد فاضية هالفترة. تواصل مع الاستوديو على الطبيعة 🙏");
       return;
     }
     const lines = days.slice(0, 10).map((d, i) => `*${i + 1}* — ${d.label} (${d.date}) — ${d.slots.length} موعد`);
-    await send(`📅 *المواعيد المتاحة*\n${lines.join("\n")}\n\nأرسل رقم اليوم أو *0* للرجوع`);
+    await send(`📅 *المواعيد الفاضية*\n${lines.join("\n")}\n\nابعث رقم اليوم، أو *0* للرجوع`);
     await setChatState(chatId, STATES.BOOK_PICK_DATE, { days: days.slice(0, 10) });
     return;
   }
@@ -123,7 +131,7 @@ async function handleMainMenu(ctx, text, data) {
   if (choice === "4") return startPayFlow(ctx);
   if (choice === "5") return startTrackFlow(ctx);
 
-  await send("اختر رقماً من 1 إلى 5، أو *0* للقائمة.");
+  await send("اختار رقم من 1 لـ 5، أو *0* للقائمة.");
 }
 
 async function handleBookPickDate(ctx, text, data) {
@@ -131,12 +139,12 @@ async function handleBookPickDate(ctx, text, data) {
   const idx = parseInt(text, 10) - 1;
   const day = data.days?.[idx];
   if (!day) {
-    await send("رقم غير صحيح. أرسل رقم اليوم من القائمة.");
+    await send("الرقم مو صحيح. ابعث رقم اليوم من القائمة.");
     return;
   }
   const slots = day.slots.slice(0, 12);
   const lines = slots.map((s, i) => `*${i + 1}* — ${s.time}`);
-  await send(`⏰ مواعيد *${day.label}*\n${lines.join("\n")}\n\nأرسل رقم الوقت`);
+  await send(`⏰ مواعيد *${day.label}*\n${lines.join("\n")}\n\nابعث رقم الوقت`);
   await setChatState(chatId, STATES.BOOK_PICK_TIME, { ...data, selectedDate: day.date, slots });
 }
 
@@ -150,13 +158,14 @@ async function handleBookPickTime(ctx, text, data) {
   }
   const ok = await isSlotAvailable(data.selectedDate, slot.time);
   if (!ok) {
-    await send("⚠️ هذا الموعد أصبح محجوزاً للتو. أرسل *0* لاختيار موعد آخر.");
+    await send("⚠️ للأسف الموعد انحجز توا. ابعث *0* واختار موعد ثاني.");
     return;
   }
   const botConfig = await getBotConfig();
   const pkgs = botConfig.packages || [];
+  const feesNote = botConfig.feesNote || FEES_NOTE_DEFAULT;
   const lines = pkgs.map((p, i) => `*${i + 1}* — ${p.label} (${p.price} د.ل)`);
-  await send(`📦 *نوع الجلسة*\n${lines.join("\n")}\n\nأرسل رقم الباقة`);
+  await send(`📦 *شنو نوع الجلسة؟*\n${lines.join("\n")}\n\n${feesNote}\n\nابعث رقم الباقة`);
   await setChatState(chatId, STATES.BOOK_PICK_PACKAGE, {
     ...data,
     selectedTime: slot.time,
@@ -172,7 +181,7 @@ async function handleBookPickPackage(ctx, text, data) {
     await send("رقم غير صحيح.");
     return;
   }
-  await send("👤 ما *اسمك الكامل*؟");
+  await send("👤 شنو *اسمك الكامل*؟");
   await setChatState(chatId, STATES.BOOK_CLIENT_NAME, {
     ...data,
     packageId: pkg.id,
@@ -184,17 +193,18 @@ async function handleBookPickPackage(ctx, text, data) {
 async function handleBookClientName(ctx, text, data) {
   const { chatId, send } = ctx;
   if (text.length < 2) {
-    await send("يرجى إدخال اسم صحيح.");
+    await send("اكتب اسم صحيح لو سمحت.");
     return;
   }
-  await send("📍 *موقع الجلسة* (القاعة / المدينة):");
+  await send("📍 وين *مكان الجلسة*؟ (القاعة / المدينة / العنوان)");
   await setChatState(chatId, STATES.BOOK_LOCATION, { ...data, clientName: text });
 }
 
 async function handleBookLocation(ctx, text, data) {
   const { chatId, send } = ctx;
+  const dep = Math.round(data.totalPrice * (config.pricing.depositPercent / 100));
   await send(
-    `💳 *طريقة الدفع*\n*1* — عربون (${Math.round(data.totalPrice * 0.3)} د.ل تقريباً)\n*2* — دفع كامل\n*3* — حجز بدون دفع الآن (فاتورة مستحقة)`
+    `💰 *شنو نوع الدفع؟*\n*1* — عربون (${dep} د.ل تقريباً)\n*2* — دفع كامل\n*3* — حجز وندفع بعدين`
   );
   await setChatState(chatId, STATES.BOOK_PAYMENT_TYPE, { ...data, location: text });
 }
@@ -204,7 +214,7 @@ async function handleBookPaymentType(ctx, text, data) {
   const map = { "1": "deposit", "2": "full", "3": "booking" };
   const paymentType = map[normalizeInput(text)];
   if (!paymentType) {
-    await send("اختر 1 أو 2 أو 3");
+    await send("اختار 1 أو 2 أو 3");
     return;
   }
   const deposit =
@@ -214,30 +224,59 @@ async function handleBookPaymentType(ctx, text, data) {
         ? Math.round(data.totalPrice * (config.pricing.depositPercent / 100))
         : 0;
 
+  await send("💳 *كاش ولا تحويل بنكي؟*\n*1* — كاش (في الاستوديو)\n*2* — تحويل بنكي");
+  await setChatState(chatId, STATES.BOOK_PAY_CHANNEL, { ...data, paymentType, deposit });
+}
+
+async function handleBookPayChannel(ctx, text, data) {
+  const { chatId, send } = ctx;
+  const botConfig = await getBotConfig();
+  const bank = { ...config.bank, ...(botConfig.bank || {}) };
+  let paymentMethod;
+  if (normalizeInput(text) === "1") paymentMethod = "كاش";
+  else if (normalizeInput(text) === "2") paymentMethod = "تحويل";
+  else {
+    await send("اختار *1* كاش أو *2* تحويل");
+    return;
+  }
+
+  const payLabel =
+    data.paymentType === "full"
+      ? "دفع كامل"
+      : data.paymentType === "deposit"
+        ? `عربون ${data.deposit} د.ل`
+        : "حجز وندفع بعدين";
+
   const summary = [
     "✅ *ملخص الحجز*",
     `الاسم: ${data.clientName}`,
     `التاريخ: ${data.selectedDate}`,
     `الوقت: ${data.selectedTime}`,
-    `الموقع: ${data.location}`,
+    `المكان: ${data.location}`,
     `الباقة: ${data.packageLabel} — ${data.totalPrice} د.ل`,
-    paymentType === "full"
-      ? "الدفع: كامل المبلغ"
-      : paymentType === "deposit"
-        ? `الدفع: عربون ${deposit} د.ل`
-        : "الدفع: لاحقاً (فاتورة مستحقة)",
+    `الدفع: ${payLabel}`,
+    `الطريقة: ${paymentMethod}`,
     "",
-    "أرسل *نعم* للتأكيد أو *0* للإلغاء",
+    "اكتب *أيوه* للتأكيد أو *0* للإلغاء",
   ].join("\n");
+
   await send(summary);
-  await setChatState(chatId, STATES.BOOK_CONFIRM, { ...data, paymentType, deposit });
+
+  if (paymentMethod === "تحويل") {
+    if (!bank.accountNumber && !bank.iban) {
+      await send("🏦 التحويل مختار — بيانات الحساب راح تتبعتلك من الإدارة بعد التأكيد.");
+    } else {
+      await send(formatBankTransfer(bank));
+    }
+  }
+
+  await setChatState(chatId, STATES.BOOK_CONFIRM, { ...data, paymentMethod });
 }
 
 async function handleBookConfirm(ctx, text, data, notifyOwner) {
   const { chatId, phone, send } = ctx;
-  const yes = ["نعم", "yes", "ok", "تأكيد", "1"].includes(normalizeInput(text));
-  if (!yes) {
-    await send("تم إلغاء الحجز. أرسل *0* للقائمة.");
+  if (!isYes(text)) {
+    await send("تم الإلغاء. ابعث *0* للقائمة.");
     await clearChatState(chatId);
     return;
   }
@@ -250,6 +289,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
     location: data.location,
     sessionType: data.packageId,
     packageLabel: data.packageLabel,
+    paymentMethod: data.paymentMethod || "كاش",
   });
 
   const invoice = await createInvoiceFromBooking({
@@ -263,30 +303,50 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
     totalPrice: data.totalPrice,
     paymentType: data.paymentType,
     deposit: data.deposit,
+    paymentMethod: data.paymentMethod || "كاش",
   });
 
   await send(
-    `🎉 *تم تسجيل حجزك!*\nرقم الجلسة: ${session.id.slice(-6).toUpperCase()}\nالحالة: *مبدئي / بانتظار التأكيد*\n\n${formatInvoiceMessage(invoice)}`
+    `🎉 *تم الحجز في النظام!*\nرقم الجلسة: ${session.id.slice(-6).toUpperCase()}\nالحالة: *مبدئي — مستنّين تأكيد الاستوديو*\n\n${formatInvoiceMessage(invoice)}`
   );
 
-  if (data.paymentType !== "full") {
-    await send("لإتمام الدفع أرسل *4* من القائمة الرئيسية (*0* ثم *4*).");
-  } else if (session.photographers?.length > 0) {
-    await confirmSession(session.id);
-    await send("✅ تم تأكيد الحجز بعد استلام الدفع الكامل. تم إخطار المصورين.");
-  } else {
-    await send("✅ تم استلام الدفع. بانتظار تعيين المصورين من الإدارة.");
+  if (data.paymentMethod === "تحويل") {
+    await send("لو حولت، ابعث صورة الإيصال من القائمة (*0* ثم *4*).");
+  } else if (data.paymentType !== "full") {
+    await send("للدفع ابعث *4* من القائمة (*0* ثم *4*).");
   }
 
+  if (data.paymentType === "full" && session.photographers?.length > 0) {
+    await confirmSession(session.id);
+    await send("✅ تم تأكيد الحجز بعد الدفع الكامل. المصورين اتنبّهوا.");
+  } else if (data.paymentType === "full") {
+    await send("✅ تم تسجيل الدفع. الإدارة راح تعيّن المصورين.");
+  }
+
+  const payInfo =
+    data.paymentType === "full"
+      ? "دفع كامل"
+      : data.paymentType === "deposit"
+        ? `عربون ${data.deposit} د.ل`
+        : "حجز بدون دفع";
+
   await notifyOwner(
-    `🔔 *حجز جديد عبر واتساب*\n👤 ${data.clientName}\n📅 ${data.selectedDate} ${data.selectedTime}\n📍 ${data.location}\n📦 ${data.packageLabel}\n📱 ${phone}` +
-    (session.photographers?.length ? `\n📸 مصورون معيّنون: ${session.photographers.length}` : `\n⚠️ بانتظار تعيين المصورين من لوحة الإدارة`)
+    `🔔 *حجز جديد — واتساب*\n` +
+    `👤 العميل: ${data.clientName}\n📱 ${phone}\n` +
+    `📅 ${data.selectedDate} — ${data.selectedTime}\n` +
+    `📍 ${data.location}\n` +
+    `📦 ${data.packageLabel} (${data.totalPrice} د.ل)\n` +
+    `💳 ${payInfo} — ${data.paymentMethod || "كاش"}\n` +
+    `🆔 جلسة: ${session.id.slice(-6).toUpperCase()}\n` +
+    (session.photographers?.length
+      ? `📸 مصورين معيّنين: ${session.photographers.length}`
+      : `⚠️ لازم تأكيد وتعيين مصور من لوحة الإدارة`)
   );
 
   if (session.photographers?.length > 0) {
-    await send(`📌 تم تعيين المصورين. سيتم إرسال التفاصيل لهم بعد تأكيد الإدارة من لوحة التحكم.`);
+    await send("📌 المصورين معيّنين — الإدارة راح تأكد الحجز من النظام.");
   } else {
-    await send(`📌 حجزك *مبدئي*. سيتواصل معك الاستوديو قريباً لتأكيد الموعد.`);
+    await send("📌 حجزك *مبدئي*. الاستوديو راح يتواصل معاك قريباً ✅");
   }
 
   await clearChatState(chatId);
@@ -427,7 +487,7 @@ async function handlePayPickInvoice(ctx, text, data) {
     return;
   }
   await send(formatInvoiceMessage(inv));
-  await send("*1* — تحويل بنكي\n*2* — سأدفع كاش في الاستوديو");
+  await send("*1* — تحويل بنكي\n*2* — كاش في الاستوديو");
   await setChatState(chatId, STATES.PAY_METHOD, { invoiceId: inv.id, invoice: inv });
 }
 
@@ -437,21 +497,13 @@ async function handlePayMethod(ctx, text, data) {
   const bank = botConfig.bank || config.bank;
 
   if (normalizeInput(text) === "1") {
-    const msg = [
-      "🏦 *بيانات التحويل*",
-      `المصرف: ${bank.name}`,
-      `اسم الحساب: ${bank.accountName}`,
-      `رقم الحساب: ${bank.accountNumber}`,
-      bank.note,
-      "",
-      "بعد التحويل أرسل *صورة الإيصال* هنا أو اكتب *تم الدفع*",
-    ].join("\n");
+    const msg = formatBankTransfer(bank);
     await send(msg);
     await setChatState(chatId, STATES.PAY_AWAIT_RECEIPT, data);
     return;
   }
   if (normalizeInput(text) === "2") {
-    await send("حسناً. عند زيارة الاستوديو سيتم تحديث الفاتورة يدوياً.");
+    await send("تمام 👍 لما تجي الاستوديو نحدّث الفاتورة.");
     await clearChatState(chatId);
     return;
   }

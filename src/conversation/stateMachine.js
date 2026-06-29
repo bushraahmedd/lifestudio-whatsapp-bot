@@ -1,4 +1,6 @@
 /** Conversation states */
+const { MAIN_MENU_TEXT } = require("./messages");
+
 const STATES = {
   MAIN_MENU: "MAIN_MENU",
   BOOK_PICK_DATE: "BOOK_PICK_DATE",
@@ -7,6 +9,7 @@ const STATES = {
   BOOK_CLIENT_NAME: "BOOK_CLIENT_NAME",
   BOOK_LOCATION: "BOOK_LOCATION",
   BOOK_PAYMENT_TYPE: "BOOK_PAYMENT_TYPE",
+  BOOK_PAY_CHANNEL: "BOOK_PAY_CHANNEL",
   BOOK_CONFIRM: "BOOK_CONFIRM",
   CANCEL_PICK: "CANCEL_PICK",
   CANCEL_CONFIRM: "CANCEL_CONFIRM",
@@ -18,16 +21,6 @@ const STATES = {
   PAY_AWAIT_RECEIPT: "PAY_AWAIT_RECEIPT",
   TRACK_PICK: "TRACK_PICK",
 };
-
-const MAIN_MENU_TEXT = `📸 *لايف استوديو*
-اختر رقم الخدمة:
-
-*1* — حجز جلسة تصوير
-*2* — إلغاء حجز
-*3* — تغيير الموعد
-*4* — الدفع / الفاتورة
-*5* — متابعة حالة الجلسة
-*0* — القائمة الرئيسية`;
 
 function normalizeInput(text) {
   return (text || "").trim().toLowerCase();

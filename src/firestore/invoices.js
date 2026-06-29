@@ -83,6 +83,7 @@ async function createInvoiceFromBooking({
   totalPrice,
   paymentType,
   deposit,
+  paymentMethod,
 }) {
   const total = Number(totalPrice) || config.pricing.defaultPrice;
   let dep = Number(deposit);
@@ -116,7 +117,7 @@ async function createInvoiceFromBooking({
     package: packageLabel || "",
     equipment: "",
     sessionContent: "",
-    paymentMethod: "تحويل",
+    paymentMethod: paymentMethod || "كاش",
     paymentType: paymentType || "deposit",
     signatureType: "default",
     notes: "صادرة تلقائياً من بوت واتساب",

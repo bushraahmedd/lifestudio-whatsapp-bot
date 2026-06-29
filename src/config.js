@@ -7,11 +7,18 @@ module.exports = {
   /** `baileys` (recommended) | `webjs` */
   whatsappProvider: (process.env.WHATSAPP_PROVIDER || "baileys").toLowerCase(),
   bank: {
-    name: process.env.BANK_NAME || "مصرف",
+    name: process.env.BANK_NAME || "مصرف ليبيا المركزي",
     accountName: process.env.BANK_ACCOUNT_NAME || "لايف استوديو",
     accountNumber: process.env.BANK_ACCOUNT_NUMBER || "",
-    note: process.env.BANK_TRANSFER_NOTE || "أرسل صورة الإيصال بعد التحويل",
+    iban: process.env.BANK_IBAN || "",
+    iban2: process.env.BANK_IBAN_2 || "",
+    note: process.env.BANK_TRANSFER_NOTE || "بعد التحويل ابعث صورة الإيصال هنا.",
   },
+  /** Comma-separated boss phones for WhatsApp alerts */
+  bossPhones: (process.env.BOSS_PHONES || "")
+    .split(",")
+    .map((p) => p.replace(/\D/g, ""))
+    .filter(Boolean),
   scheduling: {
     workStartHour: Number(process.env.WORK_START_HOUR) || 9,
     workEndHour: Number(process.env.WORK_END_HOUR) || 21,
