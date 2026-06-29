@@ -23,6 +23,8 @@ Options in the same Google/Firebase project:
 ## Recommendation
 
 - **Website + data** → Firebase (already done)
-- **WhatsApp bot 24/7** → Oracle free VM **or** your PC + Cloudflare tunnel (free, PC must stay on)
+- **Libya + free cloud** → **Render free** (`RENDER-FREE.md`) or **PC + Cloudflare**
+- **Libya + paid local** → **Libyan Spider** Tripoli VPS (`LIBYA-HOSTING.md`)
+- ~~Oracle free~~ → not available in Libya
 
 Bot settings (URL, API key, boss phones, IBAN) stay in **Firestore** `bot_config/settings` — no redeploy needed when they change.

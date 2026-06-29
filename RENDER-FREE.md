@@ -1,4 +1,6 @@
-# Deploy on Render (Free)
+# Deploy on Render (Free) — good for Libya 🇱🇾
+
+Oracle is **not** available in Libya. **Render free** is the easiest cloud option.
 
 Repo: https://github.com/bushraahmedd/lifestudio-whatsapp-bot
 
