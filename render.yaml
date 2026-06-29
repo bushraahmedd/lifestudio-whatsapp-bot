@@ -3,26 +3,24 @@ services:
     name: live-studio-whatsapp-bot
     runtime: docker
     dockerfilePath: ./Dockerfile.baileys
-    plan: starter
+    plan: free
     healthCheckPath: /api/health
     envVars:
       - key: WHATSAPP_PROVIDER
         value: baileys
       - key: BAILEYS_AUTH_PATH
-        value: /data/baileys_auth
+        value: /tmp/baileys_auth
       - key: FIREBASE_PROJECT_ID
         value: lifestudio-abf4b
       - key: NODE_ENV
         value: production
       - key: BOT_API_KEY
-        generateValue: true
+        value: live-studio-wa-2026-secret-key
       - key: OWNER_PHONE
         value: "218926128650"
+      - key: BOSS_PHONES
+        value: "218926128650,218945068428"
       - key: APP_URL
         value: https://lifestudio-abf4b.web.app
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
-    disk:
-      name: baileys-auth
-      mountPath: /data/baileys_auth
-      sizeGB: 1

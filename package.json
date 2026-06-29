@@ -10,7 +10,8 @@
     "start:webjs": "cross-env WHATSAPP_PROVIDER=webjs node src/index.js",
     "dev": "node --watch src/index.js",
     "dev:baileys": "cross-env WHATSAPP_PROVIDER=baileys node --watch src/index.js",
-    "print-sa-env": "node scripts/print-service-account-env.js"
+    "print-sa-env": "node scripts/print-service-account-env.js",
+    "update-config": "node scripts/update-bot-config.js"
   },
   "engines": {
     "node": ">=20"
