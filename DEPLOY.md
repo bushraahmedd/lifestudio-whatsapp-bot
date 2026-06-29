@@ -1,9 +1,10 @@
-# Deploy WhatsApp Bot (24/7)
+# Deploy WhatsApp Bot
 
-The bot must run continuously with a **persistent disk** for Baileys session (`/data/baileys_auth`).  
-Free tiers that sleep when idle are **not** suitable for WhatsApp.
+**No budget?** See **[FREE-DEPLOY.md](./FREE-DEPLOY.md)** — PC + Cloudflare tunnel ($0) or Oracle free VM ($0).
 
-## Recommended — Render (Starter ~$7/mo)
+Paid 24/7 hosting (Render ~$7/mo) below.
+
+## Paid — Render (Starter ~$7/mo)
 
 ### 1. Push code to GitHub
 
