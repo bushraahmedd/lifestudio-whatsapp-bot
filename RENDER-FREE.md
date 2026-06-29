@@ -11,11 +11,15 @@ Repo: https://github.com/bushraahmedd/lifestudio-whatsapp-bot
 3. Connect repo `bushraahmedd/lifestudio-whatsapp-bot`
 4. Render reads `render.yaml` (free plan)
 
-## Required secret (Environment)
+## Required secret (Environment) — MUST add or deploy fails
 
 | Key | Value |
 |-----|--------|
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | On your PC: `cd whatsapp-bot` → `npm run print-sa-env` → paste full JSON |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | On your PC: `cd whatsapp-bot` → `npm run print-sa-env` → paste **entire** JSON as one line |
+
+**If deploy failed:** you probably skipped this step.  
+Go to Render → **live-studio-whatsapp-bot** → **Environment** → Add variable → paste JSON → **Save Changes** → **Manual Deploy**.
+
 
 Other variables are set in `render.yaml` (boss phones, API key, etc.).
 
@@ -33,7 +37,7 @@ Other variables are set in `render.yaml` (boss phones, API key, etc.).
 | **No persistent disk** | After restart/deploy you may need to **scan QR again** |
 | **Wake** | First request after sleep takes 30–60 seconds |
 
-Free Render is OK for **testing**, not reliable 24/7 WhatsApp. For real 24/7 free → Oracle VM (`FREE-DEPLOY.md`).
+Free Render is OK for **testing**. For real **24/7** in Libya → **Libyan Spider** (Tripoli) or **Render Starter** ~$7/mo — see `LIBYA-HOSTING.md`.
 
 ## Boss alerts
 

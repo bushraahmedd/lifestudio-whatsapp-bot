@@ -24,18 +24,23 @@ async function main() {
   console.log("Starting Live Studio WhatsApp Bot...");
   console.log("Project:", config.firebaseProjectId);
   console.log("Provider:", config.whatsappProvider);
+  console.log("Port:", config.port);
 
-  await startBot();
-
-  const { sendText, phoneToChatId } = getProvider();
-  startWorkflowNotifier(sendText, phoneToChatId);
-  startPhotographerNotifier(sendText, phoneToChatId);
-
+  // Start HTTP first so Render health checks pass while Baileys connects
   app.listen(config.port, () => {
     console.log(`HTTP API on port ${config.port}`);
-    console.log(`Status: http://localhost:${config.port}/api/status`);
-    console.log(`State:`, getConnectionState());
+    console.log(`Health: http://localhost:${config.port}/api/health`);
   });
+
+  try {
+    await startBot();
+    const { sendText, phoneToChatId } = getProvider();
+    startWorkflowNotifier(sendText, phoneToChatId);
+    startPhotographerNotifier(sendText, phoneToChatId);
+    console.log("WhatsApp bot started:", getConnectionState());
+  } catch (err) {
+    console.error("WhatsApp bot start error (HTTP still up):", err);
+  }
 }
 
 main().catch((err) => {

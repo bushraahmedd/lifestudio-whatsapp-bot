@@ -1,15 +1,18 @@
 # Baileys — lightweight production image (no Chromium)
 FROM node:20-bookworm-slim
 
+RUN apt-get update \
+  && apt-get install -y ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 
 ENV WHATSAPP_PROVIDER=baileys
-ENV BAILEYS_AUTH_PATH=/data/baileys_auth
-
-VOLUME ["/data/baileys_auth"]
+ENV BAILEYS_AUTH_PATH=/tmp/baileys_auth
+ENV NODE_ENV=production
 
 EXPOSE 8080
 CMD ["node", "src/index.js"]
