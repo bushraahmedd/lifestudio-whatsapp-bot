@@ -13,12 +13,15 @@ Repo: https://github.com/bushraahmedd/lifestudio-whatsapp-bot
 
 ## Required secret (Environment) — MUST add or bot won't connect
 
-Pick **one** option in Render → **Environment**:
+Pick **one** option in Render → **Environment** (delete the other if both exist):
 
 | Key | How to get value |
 |-----|------------------|
-| `FIREBASE_SERVICE_ACCOUNT_B64` | **Recommended.** On PC: `npm run print-sa-env` → copy the **base64** line |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Same script → copy the **JSON** line (must be one line) |
+| `FIREBASE_SERVICE_ACCOUNT_B64` | **Use this.** On PC: `npm run print-sa-env` → copy only the **base64** line |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Only if you cannot use base64 — must be valid **one-line** JSON |
+
+**Your error (`Expected ',' at position 2386`)** means the JSON paste is broken (usually `private_key` newlines).  
+Fix: **delete** `FIREBASE_SERVICE_ACCOUNT_JSON` from Render → add `FIREBASE_SERVICE_ACCOUNT_B64` instead.
 
 **If deploy shows "failed" or service won't start:**
 1. Open Render → **live-studio-whatsapp-bot** → **Logs**
