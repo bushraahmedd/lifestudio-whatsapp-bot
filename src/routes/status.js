@@ -7,6 +7,10 @@ const config = require("../config");
 function createStatusRouter() {
   const router = express.Router();
 
+  router.get("/health", (req, res) => {
+    res.json({ ok: true, service: "live-studio-whatsapp-bot" });
+  });
+
   router.use((req, res, next) => {
     const key = req.headers["x-api-key"] || req.query.apiKey;
     if (!config.apiKey || key === config.apiKey) return next();
@@ -24,10 +28,6 @@ function createStatusRouter() {
       message: remote.message || (local.connected ? "متصل" : "غير متصل"),
       updatedAt: remote.updatedAt || null,
     });
-  });
-
-  router.get("/health", (req, res) => {
-    res.json({ ok: true, service: "live-studio-whatsapp-bot" });
   });
 
   return router;
