@@ -1,4 +1,12 @@
-const { Client, LocalAuth } = require("whatsapp-web.js");
+let Client;
+let LocalAuth;
+try {
+  ({ Client, LocalAuth } = require("whatsapp-web.js"));
+} catch {
+  throw new Error(
+    "whatsapp-web.js is not installed. Run: npm install whatsapp-web.js (or use WHATSAPP_PROVIDER=baileys)"
+  );
+}
 const qrcode = require("qrcode");
 const config = require("../config");
 const { updateBotStatus, logWhatsAppEvent, getBotConfig } = require("../firestore/botState");

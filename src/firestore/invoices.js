@@ -1,4 +1,4 @@
-const { db, FieldValue } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 const config = require("../config");
 
 const INVOICE_STATUSES = {
@@ -50,20 +50,20 @@ function buildFinanceRow(inv, invoiceId) {
 
 async function syncFinanceForInvoice(invoiceId, inv) {
   const financeRow = buildFinanceRow(inv, invoiceId);
-  let snap = await db.collection("finance").where("invoiceId", "==", invoiceId).get();
+  let snap = await fb.db.collection("finance").where("invoiceId", "==", invoiceId).get();
   if (snap.empty) {
-    snap = await db.collection("finance").where("sessionName", "==", financeRow.sessionName).get();
+    snap = await fb.db.collection("finance").where("sessionName", "==", financeRow.sessionName).get();
   }
   if (snap.empty) {
-    await db.collection("finance").add({
+    await fb.db.collection("finance").add({
       ...financeRow,
-      createdAt: FieldValue.serverTimestamp(),
+      createdAt: fb.FieldValue.serverTimestamp(),
     });
   } else {
     for (const fd of snap.docs) {
       await fd.ref.update({
         ...financeRow,
-        updatedAt: FieldValue.serverTimestamp(),
+        updatedAt: fb.FieldValue.serverTimestamp(),
       });
     }
   }
@@ -125,10 +125,10 @@ async function createInvoiceFromBooking({
     paymentStatus,
     sessionId,
     bookingSource: "whatsapp",
-    createdAt: FieldValue.serverTimestamp(),
+    createdAt: fb.FieldValue.serverTimestamp(),
   };
 
-  const ref = await db.collection("invoices").add(inv);
+  const ref = await fb.db.collection("invoices").add(inv);
   const saved = { id: ref.id, ...inv };
   await syncFinanceForInvoice(ref.id, saved);
   return saved;
@@ -136,7 +136,7 @@ async function createInvoiceFromBooking({
 
 async function getInvoicesByPhone(phone) {
   const digits = phone.replace(/\D/g, "");
-  const snap = await db.collection("invoices").get();
+  const snap = await fb.db.collection("invoices").get();
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .filter((inv) => {
@@ -156,7 +156,7 @@ function getAmountDue(inv) {
 }
 
 async function markInvoicePaid(invoiceId, partialAmount) {
-  const ref = db.collection("invoices").doc(invoiceId);
+  const ref = fb.db.collection("invoices").doc(invoiceId);
   const snap = await ref.get();
   if (!snap.exists) throw new Error("Invoice not found");
   const inv = { id: invoiceId, ...snap.data() };
@@ -169,14 +169,14 @@ async function markInvoicePaid(invoiceId, partialAmount) {
     remainingAmount: Math.max(0, total - newDeposit),
     status,
     paymentStatus: status === "paid" ? "كامل" : "جزئي",
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   };
   await ref.update({
     deposit: updated.deposit,
     remainingAmount: updated.remainingAmount,
     status: updated.status,
     paymentStatus: updated.paymentStatus,
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
   await syncFinanceForInvoice(invoiceId, updated);
   return updated;

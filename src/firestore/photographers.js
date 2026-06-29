@@ -1,4 +1,4 @@
-const { db } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 const { getBotConfig } = require("./botState");
 
 async function getDefaultPhotographerIds() {
@@ -7,7 +7,7 @@ async function getDefaultPhotographerIds() {
 }
 
 async function getPhotographersList() {
-  const snap = await db.collection("users").where("role", "==", "photographer").get();
+  const snap = await fb.db.collection("users").where("role", "==", "photographer").get();
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 

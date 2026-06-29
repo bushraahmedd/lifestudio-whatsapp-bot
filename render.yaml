@@ -1,9 +1,10 @@
 services:
   - type: web
     name: live-studio-whatsapp-bot
-    runtime: docker
-    dockerfilePath: ./Dockerfile.baileys
+    runtime: node
     plan: free
+    buildCommand: npm ci --omit=optional
+    startCommand: node src/index.js
     healthCheckPath: /api/health
     envVars:
       - key: WHATSAPP_PROVIDER
@@ -14,8 +15,8 @@ services:
         value: lifestudio-abf4b
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "8080"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=460
       - key: BOT_API_KEY
         value: live-studio-wa-2026-secret-key
       - key: OWNER_PHONE

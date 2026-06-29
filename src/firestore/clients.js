@@ -1,4 +1,4 @@
-const { db, FieldValue } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 
 function clientDocId(name, phone) {
   const normalizedPhone = (phone || "").replace(/\D/g, "");
@@ -11,7 +11,7 @@ async function upsertClientFromSession({ clientName, clientPhone, date, location
   if (!name) return null;
 
   const id = clientDocId(name, clientPhone);
-  const ref = db.collection("clients").doc(id);
+  const ref = fb.db.collection("clients").doc(id);
   const snap = await ref.get();
   const existing = snap.exists ? snap.data() : {};
 
@@ -22,12 +22,12 @@ async function upsertClientFromSession({ clientName, clientPhone, date, location
     lastSessionDate: date || existing.lastSessionDate || "",
     lastLocation: location || existing.lastLocation || "",
     source,
-    updatedAt: FieldValue.serverTimestamp(),
-    createdAt: existing.createdAt || FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
+    createdAt: existing.createdAt || fb.FieldValue.serverTimestamp(),
   };
 
   if (sessionId) {
-    payload.sessionIds = FieldValue.arrayUnion(sessionId);
+    payload.sessionIds = fb.FieldValue.arrayUnion(sessionId);
   }
 
   await ref.set(payload, { merge: true });

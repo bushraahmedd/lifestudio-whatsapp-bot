@@ -1,11 +1,11 @@
-const { db } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 
 const APP_URL = process.env.APP_URL || "https://lifestudio-abf4b.web.app";
 
 async function getPhotographerPhones(photographerIds) {
   const phones = [];
   for (const pid of photographerIds || []) {
-    const snap = await db.collection("users").doc(String(pid)).get();
+    const snap = await fb.db.collection("users").doc(String(pid)).get();
     if (!snap.exists) continue;
     const data = snap.data();
     const phone = (data.phone || "").replace(/\D/g, "");
@@ -33,7 +33,7 @@ function buildPhotographerMissionMessage(session) {
 function startPhotographerNotifier(sendText, phoneToChatId) {
   const prevById = new Map();
 
-  db.collection("sessions").onSnapshot((snap) => {
+  fb.db.collection("sessions").onSnapshot((snap) => {
     snap.docChanges().forEach(async (change) => {
       const id = change.doc.id;
       const after = change.doc.data();
@@ -99,7 +99,7 @@ async function notifyNewPhotographers(session, sessionId, alreadyNotified, sendT
   }
 
   if (sent.length > alreadyNotified.length) {
-    await db.collection("sessions").doc(sessionId).update({
+    await fb.db.collection("sessions").doc(sessionId).update({
       notifiedPhotographers: sent,
     });
   }

@@ -1,4 +1,4 @@
-const { db } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 const config = require("../config");
 
 function pad(n) {
@@ -33,7 +33,7 @@ function timesOverlap(t1, t2, durationMin) {
  * Load booked sessions for a date range (excludes cancelled).
  */
 async function getBookedSessions(fromDate, toDate) {
-  const snap = await db
+  const snap = await fb.db
     .collection("sessions")
     .where("date", ">=", fromDate)
     .where("date", "<=", toDate)

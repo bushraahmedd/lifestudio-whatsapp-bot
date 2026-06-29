@@ -1,16 +1,20 @@
 const express = require("express");
 const cors = require("cors");
 const config = require("./config");
-const { startBot, getConnectionState, getProvider } = require("./bot");
-const { createStatusRouter } = require("./routes/status");
-const { startWorkflowNotifier } = require("./listeners/workflowNotifier");
-const { startPhotographerNotifier } = require("./listeners/photographerNotifier");
+const { getFirebaseStatus } = require("./firebase/admin");
 
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-app.use("/api", createStatusRouter());
+// Health check without loading Firestore / Baileys (Render needs this fast)
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "live-studio-whatsapp-bot",
+    firebase: getFirebaseStatus(),
+  });
+});
 
 app.get("/", (req, res) => {
   res.json({
@@ -26,20 +30,22 @@ async function main() {
   console.log("Provider:", config.whatsappProvider);
   console.log("Port:", config.port);
 
-  // Start HTTP first so Render health checks pass while Baileys connects
   app.listen(config.port, () => {
     console.log(`HTTP API on port ${config.port}`);
     console.log(`Health: http://localhost:${config.port}/api/health`);
   });
 
   try {
-    await startBot();
-    const { sendText, phoneToChatId } = getProvider();
-    startWorkflowNotifier(sendText, phoneToChatId);
-    startPhotographerNotifier(sendText, phoneToChatId);
-    console.log("WhatsApp bot started:", getConnectionState());
+    const { mountApiRoutes, startServices } = require("./bootstrap");
+    mountApiRoutes(app);
+    await startServices();
   } catch (err) {
-    console.error("WhatsApp bot start error (HTTP still up):", err);
+    console.error("Bot services failed to start (HTTP /api/health still up):", err.message);
+    if (err.message.includes("Firebase credentials")) {
+      console.error(
+        "Render fix: Environment → add FIREBASE_SERVICE_ACCOUNT_JSON (run: npm run print-sa-env) or FIREBASE_SERVICE_ACCOUNT_B64"
+      );
+    }
   }
 }
 

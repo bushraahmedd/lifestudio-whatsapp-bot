@@ -1,4 +1,4 @@
-const { db, FieldValue } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 const { getDefaultPhotographerIds } = require("./photographers");
 const { upsertClientFromSession } = require("./clients");
 
@@ -34,14 +34,14 @@ async function createTentativeSession({
     sessionType: sessionType || "general",
     packageLabel: packageLabel || "",
     paymentMethod: paymentMethod || "كاش",
-    createdAt: FieldValue.serverTimestamp(),
+    createdAt: fb.FieldValue.serverTimestamp(),
     confirmedBy: [],
     declinedBy: [],
     responses: {},
     workflowStage: "booked",
     notifiedPhotographers: [],
   };
-  const ref = await db.collection("sessions").add(doc);
+  const ref = await fb.db.collection("sessions").add(doc);
   const session = { id: ref.id, ...doc };
   await upsertClientFromSession({
     clientName,
@@ -51,11 +51,11 @@ async function createTentativeSession({
     sessionId: ref.id,
     source: "whatsapp",
   });
-  await db.collection("logs").add({
+  await fb.db.collection("logs").add({
     action: `حجز واتساب جديد: ${clientName} — ${date} ${time}`,
     adminName: "بوت واتساب",
     timestamp: new Date().toLocaleString("ar-LY"),
-    createdAt: FieldValue.serverTimestamp(),
+    createdAt: fb.FieldValue.serverTimestamp(),
   });
   return session;
 }
@@ -64,20 +64,20 @@ async function assignPhotographersAndConfirm(sessionId, photographerIds) {
   if (!photographerIds?.length) {
     throw new Error("At least one photographer required");
   }
-  await db.collection("sessions").doc(sessionId).update({
+  await fb.db.collection("sessions").doc(sessionId).update({
     photographers: photographerIds,
     status: "in_progress",
     workflowStage: "confirmed",
-    confirmedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
+    confirmedAt: fb.FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
-  const snap = await db.collection("sessions").doc(sessionId).get();
+  const snap = await fb.db.collection("sessions").doc(sessionId).get();
   return { id: sessionId, ...snap.data() };
 }
 
 async function getSessionsByPhone(phone) {
   const digits = phone.replace(/\D/g, "");
-  const snap = await db.collection("sessions").get();
+  const snap = await fb.db.collection("sessions").get();
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .filter((s) => {
@@ -89,38 +89,38 @@ async function getSessionsByPhone(phone) {
 }
 
 async function cancelSession(sessionId, reason = "إلغاء عبر واتساب") {
-  await db.collection("sessions").doc(sessionId).update({
+  await fb.db.collection("sessions").doc(sessionId).update({
     status: "cancelled",
     cancelReason: reason,
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
-  const snap = await db.collection("sessions").doc(sessionId).get();
+  const snap = await fb.db.collection("sessions").doc(sessionId).get();
   return { id: sessionId, ...snap.data() };
 }
 
 async function rescheduleSession(sessionId, date, time) {
-  await db.collection("sessions").doc(sessionId).update({
+  await fb.db.collection("sessions").doc(sessionId).update({
     date,
     time,
     status: "tentative",
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
-  const snap = await db.collection("sessions").doc(sessionId).get();
+  const snap = await fb.db.collection("sessions").doc(sessionId).get();
   return { id: sessionId, ...snap.data() };
 }
 
 async function confirmSession(sessionId) {
-  await db.collection("sessions").doc(sessionId).update({
+  await fb.db.collection("sessions").doc(sessionId).update({
     status: "in_progress",
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
 }
 
 async function setWorkflowStage(sessionId, stage, extra = {}) {
-  await db.collection("sessions").doc(sessionId).update({
+  await fb.db.collection("sessions").doc(sessionId).update({
     workflowStage: stage,
     ...extra,
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
 }
 

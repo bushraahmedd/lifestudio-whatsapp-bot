@@ -19,7 +19,16 @@ function createStatusRouter() {
 
   router.get("/status", async (req, res) => {
     const local = getConnectionState();
-    const remote = await getBotStatus();
+    let remote = { connected: false, qrCode: null };
+    try {
+      remote = await getBotStatus();
+    } catch (err) {
+      remote = {
+        connected: false,
+        qrCode: null,
+        message: `Firebase: ${err.message}`,
+      };
+    }
     res.json({
       connected: local.connected || remote.connected,
       qrCode: local.qrCode || remote.qrCode || null,

@@ -1,23 +1,23 @@
-const { db, FieldValue, Timestamp } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 const config = require("../config");
 
 const BOT_STATUS_DOC = "whatsapp_bot/status";
 
 async function updateBotStatus(patch) {
-  await db.doc(BOT_STATUS_DOC).set(
-    { ...patch, updatedAt: FieldValue.serverTimestamp() },
+  await fb.db.doc(BOT_STATUS_DOC).set(
+    { ...patch, updatedAt: fb.FieldValue.serverTimestamp() },
     { merge: true }
   );
 }
 
 async function getBotStatus() {
-  const snap = await db.doc(BOT_STATUS_DOC).get();
+  const snap = await fb.db.doc(BOT_STATUS_DOC).get();
   return snap.exists ? snap.data() : { connected: false, qrCode: null };
 }
 
 /** Per-chat conversation state */
 async function getChatState(chatId) {
-  const snap = await db.collection("whatsapp_chats").doc(chatId).get();
+  const snap = await fb.db.collection("whatsapp_chats").doc(chatId).get();
   if (!snap.exists) return null;
   const data = snap.data();
   if (data.expiresAt?.toDate?.() < new Date()) {
@@ -28,21 +28,21 @@ async function getChatState(chatId) {
 }
 
 async function setChatState(chatId, state, data = {}) {
-  const expiresAt = Timestamp.fromDate(new Date(Date.now() + 30 * 60 * 1000));
-  await db.collection("whatsapp_chats").doc(chatId).set({
+  const expiresAt = fb.Timestamp.fromDate(new Date(Date.now() + 30 * 60 * 1000));
+  await fb.db.collection("whatsapp_chats").doc(chatId).set({
     state,
     data,
     expiresAt,
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: fb.FieldValue.serverTimestamp(),
   });
 }
 
 async function clearChatState(chatId) {
-  await db.collection("whatsapp_chats").doc(chatId).delete();
+  await fb.db.collection("whatsapp_chats").doc(chatId).delete();
 }
 
 async function getBotConfig() {
-  const snap = await db.doc("bot_config/settings").get();
+  const snap = await fb.db.doc("bot_config/settings").get();
   const defaults = {
     ownerPhone: config.ownerPhone,
     bossPhones: config.bossPhones.length ? config.bossPhones : [config.ownerPhone],
@@ -63,13 +63,13 @@ async function getBotConfig() {
 }
 
 async function logWhatsAppEvent({ chatId, phone, direction, message, meta = {} }) {
-  await db.collection("whatsapp_logs").add({
+  await fb.db.collection("whatsapp_logs").add({
     chatId,
     phone: phone || null,
     direction,
     message: (message || "").slice(0, 2000),
     meta,
-    createdAt: FieldValue.serverTimestamp(),
+    createdAt: fb.FieldValue.serverTimestamp(),
   });
 }
 

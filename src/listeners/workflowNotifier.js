@@ -1,4 +1,4 @@
-const { db } = require("../firebase/admin");
+const fb = require("../firebase/admin");
 
 /**
  * Notify clients when admin updates workflowStage.
@@ -6,7 +6,7 @@ const { db } = require("../firebase/admin");
 function startWorkflowNotifier(sendText, phoneToChatId) {
   const prevStages = new Map();
 
-  db.collection("sessions").onSnapshot((snap) => {
+  fb.db.collection("sessions").onSnapshot((snap) => {
     snap.docChanges().forEach(async (change) => {
       if (change.type === "removed") {
         prevStages.delete(change.doc.id);

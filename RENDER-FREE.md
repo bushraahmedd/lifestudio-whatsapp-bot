@@ -11,14 +11,23 @@ Repo: https://github.com/bushraahmedd/lifestudio-whatsapp-bot
 3. Connect repo `bushraahmedd/lifestudio-whatsapp-bot`
 4. Render reads `render.yaml` (free plan)
 
-## Required secret (Environment) — MUST add or deploy fails
+## Required secret (Environment) — MUST add or bot won't connect
 
-| Key | Value |
-|-----|--------|
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | On your PC: `cd whatsapp-bot` → `npm run print-sa-env` → paste **entire** JSON as one line |
+Pick **one** option in Render → **Environment**:
 
-**If deploy failed:** you probably skipped this step.  
-Go to Render → **live-studio-whatsapp-bot** → **Environment** → Add variable → paste JSON → **Save Changes** → **Manual Deploy**.
+| Key | How to get value |
+|-----|------------------|
+| `FIREBASE_SERVICE_ACCOUNT_B64` | **Recommended.** On PC: `npm run print-sa-env` → copy the **base64** line |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Same script → copy the **JSON** line (must be one line) |
+
+**If deploy shows "failed" or service won't start:**
+1. Open Render → **live-studio-whatsapp-bot** → **Logs**
+2. Build failed → usually out of memory (fixed: we skip Puppeteer now)
+3. Deploy OK but crashes → missing/invalid Firebase secret above
+4. After adding env → **Manual Deploy**
+
+Test after deploy: open `https://YOUR-SERVICE.onrender.com/api/health`  
+You should see `"ok": true` and `"firebase": { "ok": true }`.
 
 
 Other variables are set in `render.yaml` (boss phones, API key, etc.).
