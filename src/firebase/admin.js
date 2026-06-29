@@ -9,6 +9,14 @@ let ready = false;
 const CREDENTIALS_PATH = process.env.FIREBASE_CREDENTIALS_PATH
   || path.join("/tmp", "firebase-service-account.json");
 
+const EXPECTED_B64_LENGTH = 3184;
+
+const SECRET_FILE_PATHS = [
+  process.env.FIREBASE_SECRET_FILE,
+  "/etc/secrets/serviceAccountKey.json",
+  "/etc/secrets/firebase-service-account.json",
+].filter(Boolean);
+
 function looksLikeBase64(value) {
   const s = value.trim();
   if (!s || s.startsWith("{")) return false;
@@ -81,11 +89,26 @@ function parseServiceAccountJson(raw) {
 
 function parseB64Env(value) {
   const trimmed = value.trim();
-  // Common mistake: JSON pasted into the B64 field
   if (trimmed.startsWith("{")) {
     return parseServiceAccountJson(trimmed);
   }
+  if (trimmed.length > 0 && trimmed.length < EXPECTED_B64_LENGTH - 50) {
+    throw new Error(
+      `FIREBASE_SERVICE_ACCOUNT_B64 looks truncated (${trimmed.length} chars, need ~${EXPECTED_B64_LENGTH}). `
+      + "Easier fix: Render → Environment → Secret Files → upload serviceAccountKey.json"
+    );
+  }
   return parseServiceAccountJson(decodeBase64(trimmed));
+}
+
+function readSecretFile() {
+  for (const filePath of SECRET_FILE_PATHS) {
+    if (fs.existsSync(filePath)) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = filePath;
+      return parseServiceAccountJson(fs.readFileSync(filePath, "utf8"));
+    }
+  }
+  return null;
 }
 
 function writeCredentialsFile(serviceAccount) {
@@ -99,6 +122,9 @@ function writeCredentialsFile(serviceAccount) {
 }
 
 function resolveServiceAccount() {
+  const fromSecret = readSecretFile();
+  if (fromSecret) return fromSecret;
+
   const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
   if (b64?.trim()) {
     return parseB64Env(b64);
@@ -134,10 +160,15 @@ function resolveServiceAccount() {
 function getCredentialHint() {
   const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64?.trim();
   const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  const secretFile = SECRET_FILE_PATHS.find((p) => fs.existsSync(p));
   return {
+    hasSecretFile: !!secretFile,
+    secretFilePath: secretFile || null,
     hasB64: !!b64,
     hasJson: !!json,
     b64Length: b64?.length || 0,
+    expectedB64Length: EXPECTED_B64_LENGTH,
+    b64Truncated: !!b64 && b64.length < EXPECTED_B64_LENGTH - 50,
     jsonLength: json?.length || 0,
     b64LooksLikeJson: !!b64?.startsWith("{"),
     productionIgnoresJson: process.env.NODE_ENV === "production",
@@ -176,7 +207,8 @@ function getFirebaseStatus() {
   }
 
   const hint = getCredentialHint();
-  if (!hint.hasB64 && !hint.hasJson && !fs.existsSync(path.join(process.cwd(), "serviceAccountKey.json"))) {
+  if (!hint.hasB64 && !hint.hasJson && !hint.hasSecretFile
+    && !fs.existsSync(path.join(process.cwd(), "serviceAccountKey.json"))) {
     return {
       ok: false,
       error: "Firebase credentials not configured",

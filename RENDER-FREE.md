@@ -13,15 +13,27 @@ Repo: https://github.com/bushraahmedd/lifestudio-whatsapp-bot
 
 ## Required secret (Environment) — MUST add or bot won't connect
 
-Pick **one** option in Render → **Environment** (delete the other if both exist):
+Pick **one** option in Render → **live-studio-whatsapp-bot** → **Environment**:
 
-| Key | How to get value |
-|-----|------------------|
-| `FIREBASE_SERVICE_ACCOUNT_B64` | **Use this.** On PC: `npm run print-sa-env` → copy only the **base64** line |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Only if you cannot use base64 — must be valid **one-line** JSON |
+### Option A — Secret File (easiest, recommended)
 
-**Your error (`Expected ',' at position 2386`)** means the JSON paste is broken (usually `private_key` newlines).  
-Fix: **delete** `FIREBASE_SERVICE_ACCOUNT_JSON` from Render → add `FIREBASE_SERVICE_ACCOUNT_B64` instead.
+1. **Delete** env var `FIREBASE_SERVICE_ACCOUNT_B64` if set
+2. Scroll to **Secret Files** → **Add Secret File**
+3. Filename: `serviceAccountKey.json`
+4. Upload the file from your PC: `whatsapp-bot/serviceAccountKey.json`
+5. Save → redeploy
+
+### Option B — Base64 env var
+
+1. On PC:
+   ```powershell
+   cd c:\Users\BesanCo\Desktop\life\whatsapp-bot
+   npm run save-b64-file
+   ```
+2. Open `b64.txt` → **Ctrl+A** → **Ctrl+C** (full line, **3184** characters)
+3. Render → Environment → `FIREBASE_SERVICE_ACCOUNT_B64` → paste → Save
+
+**Truncated paste** (`b64Length` 3108 instead of 3184) causes `Unterminated string` errors.
 
 **If deploy shows "failed" or service won't start:**
 1. Open Render → **live-studio-whatsapp-bot** → **Logs**

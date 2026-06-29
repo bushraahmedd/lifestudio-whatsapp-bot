@@ -3,6 +3,7 @@ node_modules/
 .wwebjs_cache/
 .baileys_auth/
 serviceAccountKey.json
+b64.txt
 .env
 firebase-debug.log
 *.log

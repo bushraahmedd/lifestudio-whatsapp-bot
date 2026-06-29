@@ -12,6 +12,7 @@
     "dev:baileys": "cross-env WHATSAPP_PROVIDER=baileys node --watch src/index.js",
     "print-sa-env": "node scripts/print-service-account-env.js",
     "print-sa-b64": "node scripts/print-sa-b64.js",
+    "save-b64-file": "node scripts/save-b64-file.js",
     "render-deploy": "node scripts/render-set-firebase.js",
     "update-config": "node scripts/update-bot-config.js"
   },
