@@ -4,18 +4,39 @@ const { startWorkflowNotifier } = require("./listeners/workflowNotifier");
 const { startPhotographerNotifier } = require("./listeners/photographerNotifier");
 const { ensureFirebase } = require("./firebase/admin");
 
+let startPromise = null;
+let started = false;
+
 function mountApiRoutes(app) {
   app.use("/api", createStatusRouter());
 }
 
-async function startServices() {
-  ensureFirebase();
-  await startBot();
-  const { sendText, phoneToChatId } = getProvider();
-  startWorkflowNotifier(sendText, phoneToChatId);
-  startPhotographerNotifier(sendText, phoneToChatId);
-  const { getConnectionState } = require("./bot");
-  console.log("WhatsApp bot started:", getConnectionState());
+async function ensureWhatsAppStarted() {
+  if (started) return;
+  if (startPromise) return startPromise;
+
+  startPromise = (async () => {
+    console.log("Starting WhatsApp services...");
+    ensureFirebase();
+    await startBot();
+    const { sendText, phoneToChatId } = getProvider();
+    startWorkflowNotifier(sendText, phoneToChatId);
+    startPhotographerNotifier(sendText, phoneToChatId);
+    const { getConnectionState } = require("./bot");
+    console.log("WhatsApp bot started:", getConnectionState());
+    started = true;
+  })().catch((err) => {
+    startPromise = null;
+    console.error("WhatsApp start failed:", err.message);
+    throw err;
+  });
+
+  return startPromise;
 }
 
-module.exports = { mountApiRoutes, startServices };
+/** @deprecated use ensureWhatsAppStarted */
+async function startServices() {
+  return ensureWhatsAppStarted();
+}
+
+module.exports = { mountApiRoutes, ensureWhatsAppStarted, startServices };

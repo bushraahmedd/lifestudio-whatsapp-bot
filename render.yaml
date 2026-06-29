@@ -16,7 +16,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: NODE_OPTIONS
-        value: --max-old-space-size=460
+        value: --max-old-space-size=384
+      - key: WHATSAPP_LAZY_START
+        value: "true"
       - key: BOT_API_KEY
         value: live-studio-wa-2026-secret-key
       - key: OWNER_PHONE

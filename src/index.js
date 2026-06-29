@@ -2,12 +2,19 @@ const express = require("express");
 const cors = require("cors");
 const config = require("./config");
 const { getFirebaseStatus } = require("./firebase/admin");
+const { mountApiRoutes } = require("./bootstrap");
+
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException (keeping HTTP alive):", err);
+});
+process.on("unhandledRejection", (err) => {
+  console.error("unhandledRejection (keeping HTTP alive):", err);
+});
 
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-// Health check without loading Firestore / Baileys (Render needs this fast)
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
@@ -21,31 +28,29 @@ app.get("/", (req, res) => {
     service: "live-studio-whatsapp-bot",
     provider: config.whatsappProvider,
     docs: "/api/health",
+    status: "/api/status",
   });
 });
+
+mountApiRoutes(app);
 
 async function main() {
   console.log("Starting Live Studio WhatsApp Bot...");
   console.log("Project:", config.firebaseProjectId);
   console.log("Provider:", config.whatsappProvider);
   console.log("Port:", config.port);
+  console.log("Lazy WhatsApp start:", process.env.WHATSAPP_LAZY_START !== "false");
 
-  app.listen(config.port, () => {
-    console.log(`HTTP API on port ${config.port}`);
+  app.listen(config.port, "0.0.0.0", () => {
+    console.log(`HTTP API on 0.0.0.0:${config.port}`);
     console.log(`Health: http://localhost:${config.port}/api/health`);
   });
 
-  try {
-    const { mountApiRoutes, startServices } = require("./bootstrap");
-    mountApiRoutes(app);
-    await startServices();
-  } catch (err) {
-    console.error("Bot services failed to start (HTTP /api/health still up):", err.message);
-    if (err.message.includes("Firebase credentials")) {
-      console.error(
-        "Render fix: Environment → add FIREBASE_SERVICE_ACCOUNT_JSON (run: npm run print-sa-env) or FIREBASE_SERVICE_ACCOUNT_B64"
-      );
-    }
+  if (process.env.WHATSAPP_LAZY_START === "false") {
+    const { ensureWhatsAppStarted } = require("./bootstrap");
+    ensureWhatsAppStarted().catch((err) => {
+      console.error("WhatsApp auto-start failed (HTTP still up):", err.message);
+    });
   }
 }
 
