@@ -1,0 +1,29 @@
+{
+  "name": "live-studio-whatsapp-bot",
+  "version": "1.1.0",
+  "description": "WhatsApp automation bot for Live Studio (Baileys or whatsapp-web.js + Firestore)",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:baileys": "cross-env WHATSAPP_PROVIDER=baileys node src/index.js",
+    "start:webjs": "cross-env WHATSAPP_PROVIDER=webjs node src/index.js",
+    "dev": "node --watch src/index.js",
+    "dev:baileys": "cross-env WHATSAPP_PROVIDER=baileys node --watch src/index.js",
+    "print-sa-env": "node scripts/print-service-account-env.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.2",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}

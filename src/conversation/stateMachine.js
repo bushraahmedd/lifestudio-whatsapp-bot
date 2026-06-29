@@ -1,0 +1,41 @@
+/** Conversation states */
+const STATES = {
+  MAIN_MENU: "MAIN_MENU",
+  BOOK_PICK_DATE: "BOOK_PICK_DATE",
+  BOOK_PICK_TIME: "BOOK_PICK_TIME",
+  BOOK_PICK_PACKAGE: "BOOK_PICK_PACKAGE",
+  BOOK_CLIENT_NAME: "BOOK_CLIENT_NAME",
+  BOOK_LOCATION: "BOOK_LOCATION",
+  BOOK_PAYMENT_TYPE: "BOOK_PAYMENT_TYPE",
+  BOOK_CONFIRM: "BOOK_CONFIRM",
+  CANCEL_PICK: "CANCEL_PICK",
+  CANCEL_CONFIRM: "CANCEL_CONFIRM",
+  RESCHEDULE_PICK: "RESCHEDULE_PICK",
+  RESCHEDULE_DATE: "RESCHEDULE_DATE",
+  RESCHEDULE_TIME: "RESCHEDULE_TIME",
+  PAY_PICK_INVOICE: "PAY_PICK_INVOICE",
+  PAY_METHOD: "PAY_METHOD",
+  PAY_AWAIT_RECEIPT: "PAY_AWAIT_RECEIPT",
+  TRACK_PICK: "TRACK_PICK",
+};
+
+const MAIN_MENU_TEXT = `📸 *لايف استوديو*
+اختر رقم الخدمة:
+
+*1* — حجز جلسة تصوير
+*2* — إلغاء حجز
+*3* — تغيير الموعد
+*4* — الدفع / الفاتورة
+*5* — متابعة حالة الجلسة
+*0* — القائمة الرئيسية`;
+
+function normalizeInput(text) {
+  return (text || "").trim().toLowerCase();
+}
+
+function isBack(text) {
+  const t = normalizeInput(text);
+  return t === "0" || t === "رجوع" || t === "back";
+}
+
+module.exports = { STATES, MAIN_MENU_TEXT, normalizeInput, isBack };

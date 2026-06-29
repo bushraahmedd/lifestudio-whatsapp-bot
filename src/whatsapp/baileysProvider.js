@@ -1,0 +1,166 @@
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+} = require("@whiskeysockets/baileys");
+const qrcode = require("qrcode");
+const pino = require("pino");
+const config = require("../config");
+const { updateBotStatus, logWhatsAppEvent } = require("../firestore/botState");
+
+function extractMessageText(msg) {
+  const m = msg.message;
+  if (!m) return "";
+  return (
+    m.conversation
+    || m.extendedTextMessage?.text
+    || m.imageMessage?.caption
+    || m.documentMessage?.caption
+    || ""
+  );
+}
+
+function hasMediaMessage(msg) {
+  const m = msg.message;
+  if (!m) return false;
+  return !!(m.imageMessage || m.documentMessage || m.videoMessage || m.audioMessage);
+}
+
+/**
+ * @param {function} onIncomingMessage
+ * @returns {import('./provider').WhatsAppProvider}
+ */
+function createBaileysProvider(onIncomingMessage) {
+  let sock = null;
+  let connectionState = { connected: false, qrCode: null, phoneNumber: null, provider: "baileys" };
+  let starting = false;
+
+  function phoneToChatId(phone) {
+    const digits = phone.replace(/\D/g, "");
+    return `${digits}@s.whatsapp.net`;
+  }
+
+  async function sendText(chatId, text) {
+    if (!sock || !connectionState.connected) {
+      console.warn("[baileys] Cannot send — disconnected");
+      return;
+    }
+    const jid = chatId.includes("@") ? chatId : phoneToChatId(chatId);
+    await sock.sendMessage(jid, { text });
+    await logWhatsAppEvent({ chatId: jid, direction: "out", message: text });
+  }
+
+  async function notifyOwner(text) {
+    await sendText(phoneToChatId(config.ownerPhone), text);
+  }
+
+  function getConnectionState() {
+    return { ...connectionState };
+  }
+
+  async function start() {
+    if (starting) return;
+    starting = true;
+
+    const { state, saveCreds } = await useMultiFileAuthState(config.baileysAuthPath);
+    const { version } = await fetchLatestBaileysVersion();
+
+    sock = makeWASocket({
+      version,
+      auth: state,
+      logger: pino({ level: "silent" }),
+      printQRInTerminal: false,
+      syncFullHistory: false,
+      markOnlineOnConnect: true,
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        console.log("\n[baileys] Scan QR:\n");
+        console.log(await qrcode.toString(qr, { type: "terminal", small: true }));
+        const dataUrl = await qrcode.toDataURL(qr);
+        connectionState = { connected: false, qrCode: dataUrl, phoneNumber: null, provider: "baileys" };
+        await updateBotStatus({
+          connected: false,
+          qrCode: dataUrl,
+          phoneNumber: null,
+          provider: "baileys",
+          message: "امسح رمز QR — Baileys",
+        });
+      }
+
+      if (connection === "open") {
+        const phone = (sock.user?.id || "").split(":")[0].split("@")[0];
+        connectionState = { connected: true, qrCode: null, phoneNumber: phone, provider: "baileys" };
+        await updateBotStatus({
+          connected: true,
+          qrCode: null,
+          phoneNumber: phone,
+          provider: "baileys",
+          message: "متصل (Baileys)",
+          lastConnectedAt: new Date().toISOString(),
+        });
+        console.log("[baileys] Ready:", phone);
+        starting = false;
+      }
+
+      if (connection === "close") {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        connectionState = { connected: false, qrCode: null, phoneNumber: null, provider: "baileys" };
+        await updateBotStatus({
+          connected: false,
+          qrCode: null,
+          provider: "baileys",
+          message: loggedOut ? "تم تسجيل الخروج — امسح QR مجدداً" : "إعادة الاتصال...",
+        });
+        starting = false;
+        if (!loggedOut) {
+          setTimeout(() => start().catch(console.error), 5000);
+        }
+      }
+    });
+
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (type !== "notify") return;
+      for (const msg of messages) {
+        try {
+          if (msg.key.fromMe) continue;
+          if (!msg.key.remoteJid || msg.key.remoteJid === "status@broadcast") continue;
+
+          const chatId = msg.key.remoteJid;
+          const phone = chatId.split("@")[0];
+          const body = extractMessageText(msg);
+          const hasMedia = hasMediaMessage(msg);
+
+          await onIncomingMessage({
+            chatId,
+            phone,
+            body: hasMedia && !body ? "[صورة مرفقة]" : body,
+            hasMedia,
+            send: (text) => sendText(chatId, text),
+            notifyOwner,
+          });
+        } catch (err) {
+          console.error("[baileys] message error:", err);
+        }
+      }
+    });
+  }
+
+  return {
+    name: "baileys",
+    start,
+    getConnectionState,
+    sendText,
+    phoneToChatId,
+    notifyOwner,
+  };
+}
+
+module.exports = { createBaileysProvider };

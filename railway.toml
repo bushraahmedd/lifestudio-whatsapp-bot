@@ -1,0 +1,14 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.baileys"
+
+[deploy]
+startCommand = "node src/index.js"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+numReplicas = 1
+
+# Attach a volume in Railway dashboard:
+# Mount path: /data/baileys_auth
+# Variable: BAILEYS_AUTH_PATH=/data/baileys_auth

@@ -1,0 +1,9 @@
+node_modules
+.wwebjs_auth
+.wwebjs_cache
+.baileys_auth
+.env
+serviceAccountKey.json
+*.log
+data
+.git

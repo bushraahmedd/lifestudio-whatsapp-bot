@@ -1,0 +1,15 @@
+# Baileys — lightweight production image (no Chromium)
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY src ./src
+
+ENV WHATSAPP_PROVIDER=baileys
+ENV BAILEYS_AUTH_PATH=/data/baileys_auth
+
+VOLUME ["/data/baileys_auth"]
+
+EXPOSE 8080
+CMD ["node", "src/index.js"]
