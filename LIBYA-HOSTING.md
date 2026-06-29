@@ -9,7 +9,8 @@
 | **1. Render (free)** | $0 | ⚠️ Sleeps when idle | Easiest cloud — already configured → see `RENDER-FREE.md` |
 | **2. Your PC + Cloudflare** | $0 | While PC is on | Works today, no signup abroad |
 | **3. Libyan Spider (JPaaS)** | Trial then paid | Yes | **Server in Tripoli** — libyanspider.com |
-| **4. Render Starter** | ~$7/mo | Yes | Real 24/7 if you can pay later |
+| **4. Google Cloud e2-micro** | $0** | Yes | If signup works — US region VM → `GCP-FREE.md` |
+| **5. Render Starter** | ~$7/mo | Yes | Real 24/7 if you can pay later |
 
 ---
 
@@ -59,7 +60,17 @@ Use Cloudflare tunnel on the server for HTTPS URL to admin.
 
 ---
 
-## Option 4 — Koyeb (free tier, global signup)
+## Option 4 — Google Cloud e2-micro (free VM)
+
+Same Google account as Firebase. One small server **free forever** in US regions.
+
+Steps: **`GCP-FREE.md`**
+
+Needs billing card for signup (usually **$0** on e2-micro only). May work from Libya when Oracle does not.
+
+---
+
+## Option 5 — Koyeb (free tier, global signup)
 
 May work from Libya with GitHub:
 
