@@ -6,10 +6,19 @@ const config = require("../config");
 let initError = null;
 let ready = false;
 
+const CREDENTIALS_PATH = process.env.FIREBASE_CREDENTIALS_PATH
+  || path.join("/tmp", "firebase-service-account.json");
+
 function looksLikeBase64(value) {
   const s = value.trim();
   if (!s || s.startsWith("{")) return false;
-  return /^[A-Za-z0-9+/=\s]+$/.test(s) && s.length > 100;
+  return /^[A-Za-z0-9+/=_\s-]+$/.test(s) && s.length > 100;
+}
+
+function decodeBase64(value) {
+  let s = value.trim().replace(/\s/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  return Buffer.from(s, "base64").toString("utf8");
 }
 
 function fixPrivateKeyNewlines(jsonText) {
@@ -47,18 +56,12 @@ function parseServiceAccountJson(raw) {
   const attempts = [
     () => JSON.parse(text),
     () => JSON.parse(fixPrivateKeyNewlines(text)),
-    () => {
-      const compact = text.replace(/\r?\n/g, "");
-      return JSON.parse(compact);
-    },
-    () => {
-      const compact = fixPrivateKeyNewlines(text).replace(/\r?\n/g, "");
-      return JSON.parse(compact);
-    },
+    () => JSON.parse(text.replace(/\r?\n/g, "")),
+    () => JSON.parse(fixPrivateKeyNewlines(text).replace(/\r?\n/g, "")),
   ];
 
   if (looksLikeBase64(text)) {
-    attempts.unshift(() => JSON.parse(Buffer.from(text.replace(/\s/g, ""), "base64").toString("utf8")));
+    attempts.unshift(() => JSON.parse(decodeBase64(text)));
   }
 
   let lastError = null;
@@ -71,20 +74,39 @@ function parseServiceAccountJson(raw) {
   }
 
   throw new Error(
-    `Invalid Firebase service account JSON (${lastError?.message || "parse failed"}). `
-    + "Use FIREBASE_SERVICE_ACCOUNT_B64 from: npm run print-sa-env"
+    `Invalid Firebase service account (${lastError?.message || "parse failed"}). `
+    + "On Render: delete FIREBASE_SERVICE_ACCOUNT_JSON, set FIREBASE_SERVICE_ACCOUNT_B64 only (npm run print-sa-b64)."
   );
+}
+
+function parseB64Env(value) {
+  const trimmed = value.trim();
+  // Common mistake: JSON pasted into the B64 field
+  if (trimmed.startsWith("{")) {
+    return parseServiceAccountJson(trimmed);
+  }
+  return parseServiceAccountJson(decodeBase64(trimmed));
+}
+
+function writeCredentialsFile(serviceAccount) {
+  try {
+    fs.mkdirSync(path.dirname(CREDENTIALS_PATH), { recursive: true });
+    fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(serviceAccount), { mode: 0o600 });
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = CREDENTIALS_PATH;
+  } catch (err) {
+    console.warn("Could not write credentials file:", err.message);
+  }
 }
 
 function resolveServiceAccount() {
   const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
-  if (b64) {
-    const json = Buffer.from(b64.replace(/\s/g, ""), "base64").toString("utf8");
-    return parseServiceAccountJson(json);
+  if (b64?.trim()) {
+    return parseB64Env(b64);
   }
 
+  const isProduction = process.env.NODE_ENV === "production";
   const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (inlineJson) {
+  if (inlineJson?.trim() && !isProduction) {
     return parseServiceAccountJson(inlineJson);
   }
 
@@ -99,7 +121,27 @@ function resolveServiceAccount() {
     return parseServiceAccountJson(fs.readFileSync(localPath, "utf8"));
   }
 
+  if (isProduction && inlineJson?.trim()) {
+    throw new Error(
+      "FIREBASE_SERVICE_ACCOUNT_JSON is set but broken. Delete it on Render. "
+      + "Set FIREBASE_SERVICE_ACCOUNT_B64 only (npm run print-sa-b64)."
+    );
+  }
+
   return null;
+}
+
+function getCredentialHint() {
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64?.trim();
+  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  return {
+    hasB64: !!b64,
+    hasJson: !!json,
+    b64Length: b64?.length || 0,
+    jsonLength: json?.length || 0,
+    b64LooksLikeJson: !!b64?.startsWith("{"),
+    productionIgnoresJson: process.env.NODE_ENV === "production",
+  };
 }
 
 function ensureFirebase() {
@@ -111,9 +153,10 @@ function ensureFirebase() {
       const serviceAccount = resolveServiceAccount();
       if (!serviceAccount) {
         throw new Error(
-          "Firebase credentials missing. Set FIREBASE_SERVICE_ACCOUNT_B64 (recommended) or FIREBASE_SERVICE_ACCOUNT_JSON."
+          "Firebase credentials missing. On Render set FIREBASE_SERVICE_ACCOUNT_B64 (npm run print-sa-b64)."
         );
       }
+      writeCredentialsFile(serviceAccount);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: config.firebaseProjectId,
@@ -128,22 +171,24 @@ function ensureFirebase() {
 
 function getFirebaseStatus() {
   if (ready) return { ok: true };
-  if (initError) return { ok: false, error: initError.message };
+  if (initError) {
+    return { ok: false, error: initError.message, hint: getCredentialHint() };
+  }
 
-  const hasEnv =
-    !!process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-    || !!process.env.FIREBASE_SERVICE_ACCOUNT_B64
-    || fs.existsSync(path.join(process.cwd(), "serviceAccountKey.json"));
-
-  if (!hasEnv) {
-    return { ok: false, error: "Firebase credentials not configured" };
+  const hint = getCredentialHint();
+  if (!hint.hasB64 && !hint.hasJson && !fs.existsSync(path.join(process.cwd(), "serviceAccountKey.json"))) {
+    return {
+      ok: false,
+      error: "Firebase credentials not configured",
+      hint,
+    };
   }
 
   try {
     resolveServiceAccount();
-    return { ok: false, error: "Firebase not initialized yet" };
+    return { ok: false, error: "Firebase not initialized yet", hint };
   } catch (err) {
-    return { ok: false, error: err.message };
+    return { ok: false, error: err.message, hint };
   }
 }
 

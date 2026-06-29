@@ -27,5 +27,3 @@ services:
         value: https://lifestudio-abf4b.web.app
       - key: FIREBASE_SERVICE_ACCOUNT_B64
         sync: false
-      - key: FIREBASE_SERVICE_ACCOUNT_JSON
-        sync: false
