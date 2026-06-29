@@ -18,13 +18,17 @@ function listSecretFileCandidates() {
     candidates.add(process.env.FIREBASE_SECRET_FILE);
   }
 
+  const isProduction = process.env.NODE_ENV === "production";
+
   for (const name of [
     "serviceAccountKey.json",
     "firebase-service-account.json",
     "service-account.json",
   ]) {
     candidates.add(path.join("/etc/secrets", name));
-    candidates.add(path.join(process.cwd(), name));
+    if (!isProduction) {
+      candidates.add(path.join(process.cwd(), name));
+    }
   }
 
   try {
@@ -150,10 +154,18 @@ function writeCredentialsFile(serviceAccount) {
 }
 
 function resolveServiceAccount() {
-  const errors = [];
-
   const fromSecret = readSecretFile();
   if (fromSecret) return fromSecret;
+
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction) {
+    throw new Error(
+      "Secret file not loaded. Render → Environment → Secret Files → serviceAccountKey.json. "
+      + "Delete FIREBASE_SERVICE_ACCOUNT_B64 if still set."
+    );
+  }
+
+  const errors = [];
 
   const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
   if (b64?.trim()) {
@@ -164,9 +176,8 @@ function resolveServiceAccount() {
     }
   }
 
-  const isProduction = process.env.NODE_ENV === "production";
   const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (inlineJson?.trim() && !isProduction) {
+  if (inlineJson?.trim()) {
     try {
       return parseServiceAccountJson(inlineJson);
     } catch (err) {
@@ -181,10 +192,6 @@ function resolveServiceAccount() {
     } catch (err) {
       errors.push(err.message);
     }
-  }
-
-  if (isProduction && inlineJson?.trim()) {
-    errors.push("Delete broken FIREBASE_SERVICE_ACCOUNT_JSON on Render.");
   }
 
   if (errors.length) {
@@ -249,19 +256,14 @@ function getFirebaseStatus() {
     return { ok: false, error: initError.message, hint: getCredentialHint() };
   }
 
-  const hint = getCredentialHint();
-  if (!hint.hasB64 && !hint.hasJson && !hint.hasSecretFile) {
-    return {
-      ok: false,
-      error: "Firebase credentials not configured",
-      hint,
-    };
-  }
-
   try {
-    resolveServiceAccount();
-    return { ok: false, error: "Firebase not initialized yet", hint };
+    ensureFirebase();
+    return { ok: true };
   } catch (err) {
+    const hint = getCredentialHint();
+    if (hint.hasSecretFile && hint.hasB64) {
+      hint.deleteB64 = "Delete FIREBASE_SERVICE_ACCOUNT_B64 — Secret File is enough";
+    }
     return { ok: false, error: err.message, hint };
   }
 }
