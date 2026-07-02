@@ -191,7 +191,7 @@ async function handleIntentClarify(ctx, text, data) {
   }
 
   await send(await buildAmbiguousClarifier(
-    detected.categories.length ? detected.categories : ["graduation", "studio_rental", "wedding"]
+    detected.categories.length ? detected.categories : ["wedding", "graduation", "equipment"]
   ));
 }
 
@@ -565,12 +565,16 @@ async function startPayFlow(ctx) {
   const { chatId, phone, send } = ctx;
   const invoices = (await getInvoicesByPhone(phone)).filter((i) => getAmountDue(i) > 0);
   if (!invoices.length) {
-    await send("لا توجد فواتير مستحقة على رقمك.");
+    await send("لا توجد فواتير بمبالغ متبقية على رقمك.");
     return;
   }
   const lines = invoices.slice(0, 8).map((inv, i) => {
     const due = getAmountDue(inv);
-    return `*${i + 1}* — ${inv.sessionName} | مستحق ${due} د.ل`;
+    const total = Number(inv.totalPrice) || 0;
+    if (due > 0) {
+      return `*${i + 1}* — ${inv.sessionName} | السعر ${total} د.ل | المبلغ المستحق ${due} د.ل`;
+    }
+    return `*${i + 1}* — ${inv.sessionName} | السعر ${total} د.ل`;
   });
   await send(`💰 *الدفع*\n${lines.join("\n")}`);
   await setChatState(chatId, STATES.PAY_PICK_INVOICE, { invoices: invoices.slice(0, 8) });

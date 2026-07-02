@@ -35,6 +35,7 @@ function generateInvoicePdf(invoice, session = {}) {
     const total = Number(invoice.totalPrice) || 0;
     const paid = Number(invoice.deposit) || 0;
     const due = Math.max(0, total - paid);
+    const isDeposit = invoice.paymentType === "deposit" || (paid > 0 && paid < total);
     const invNo = `#INV-${(invoice.id || "").slice(-8).toUpperCase() || "--------"}`;
 
     doc.font(font).fontSize(22).fillColor(BRAND.color).text(BRAND.nameAr, { align: "right" });
@@ -75,9 +76,13 @@ function generateInvoicePdf(invoice, session = {}) {
     doc.moveDown(0.5);
     doc.fontSize(11).fillColor("#333");
     doc.text(`الباقة: ${invoice.package || invoice.sessionName || "—"}`, { align: "right" });
-    doc.text(`الإجمالي: ${total.toLocaleString()} د.ل`, { align: "right" });
-    doc.text(`المدفوع (عربون/دفع): ${paid.toLocaleString()} د.ل`, { align: "right" });
-    doc.text(`المتبقي: ${due.toLocaleString()} د.ل`, { align: "right" });
+    doc.text(`السعر: ${total.toLocaleString()} د.ل`, { align: "right" });
+    if (paid > 0) {
+      doc.text(`المدفوع: ${paid.toLocaleString()} د.ل`, { align: "right" });
+    }
+    if (isDeposit && due > 0) {
+      doc.text(`المبلغ المستحق: ${due.toLocaleString()} د.ل`, { align: "right" });
+    }
     doc.text(`طريقة الدفع: ${invoice.paymentMethod || "—"}`, { align: "right" });
     doc.text(`الحالة: ${invoice.paymentStatus || invoice.status || "—"}`, { align: "right" });
 

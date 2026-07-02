@@ -183,18 +183,30 @@ async function markInvoicePaid(invoiceId, partialAmount) {
 }
 
 function formatInvoiceMessage(inv) {
+  const total = Number(inv.totalPrice) || 0;
+  const paid = Number(inv.deposit) || 0;
   const due = getAmountDue(inv);
+  const isDeposit = inv.paymentType === "deposit" || (paid > 0 && paid < total);
+
   const lines = [
     "🧾 *فاتورة لايف استوديو*",
     `رقم: #${inv.id.slice(-6).toUpperCase()}`,
     `العميل: ${inv.clientName}`,
     `الجلسة: ${inv.sessionName || "—"}`,
     `التاريخ: ${inv.date}`,
-    `الإجمالي: *${Number(inv.totalPrice).toLocaleString()} د.ل*`,
-    `المدفوع: ${Number(inv.deposit || 0).toLocaleString()} د.ل`,
-    due > 0 ? `المستحق: *${due.toLocaleString()} د.ل*` : "✅ مسددة بالكامل",
-    `الحالة: ${INVOICE_STATUSES[resolveInvoiceStatus(inv)] || inv.status}`,
+    `السعر: *${total.toLocaleString()} د.ل*`,
   ];
+
+  if (paid > 0) {
+    lines.push(`المدفوع: ${paid.toLocaleString()} د.ل`);
+  }
+  if (isDeposit && due > 0) {
+    lines.push(`المبلغ المستحق: *${due.toLocaleString()} د.ل*`);
+  } else if (paid >= total && total > 0) {
+    lines.push("✅ مسددة بالكامل");
+  }
+
+  lines.push(`الحالة: ${INVOICE_STATUSES[resolveInvoiceStatus(inv)] || inv.status}`);
   return lines.join("\n");
 }
 

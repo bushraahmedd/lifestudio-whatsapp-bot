@@ -3,18 +3,38 @@ const { getPackages } = require("../firestore/packages");
 const CATEGORY_META = {
   graduation: {
     title: "تخرج",
-    opener: "مبروك التخرج! 🎓 فرحتنا فيكم، وهذي باقات التخرج الخاصة بنا:",
+    opener: "مبروك التخرج! 🎓 فرحتنا فيكم، وهذي باقات التخرج:",
     tone: "warm",
   },
   studio_rental: {
     title: "إيجار الاستوديو",
-    opener: "أهلاً بيك 👋 هذي تفاصيل إيجار الاستوديو والأسعار:",
+    opener: "أهلاً بيك 👋 هذي تفاصيل إيجار أرضية الاستوديو:",
     tone: "professional",
   },
   wedding: {
     title: "زفاف ومناسبات",
-    opener: "مبروك للعرسان! 💍 يشرّفنا نوثّق يومكم الكبير — هذي باقات الزفاف:",
+    opener: "مبروك للعرسان! 💍 يشرّفنا نوثّق يومكم — هذي باقات الزفاف والخطوبة:",
     tone: "celebratory",
+  },
+  equipment: {
+    title: "معدات وتأثيرات",
+    opener: "🩷 أسعار المعدات والتأثيرات الإضافية:",
+    tone: "professional",
+  },
+  pets: {
+    title: "جلسات البتات",
+    opener: "🐾 هذي باقات تصوير البتات:",
+    tone: "warm",
+  },
+  birthday: {
+    title: "أعياد ميلاد",
+    opener: "🎂 هذي باقات أعياد ميلاد الأطفال:",
+    tone: "warm",
+  },
+  family: {
+    title: "جلسات عائلية",
+    opener: "👨‍👩‍👧 هذي باقات الجلسات العائلية:",
+    tone: "warm",
   },
 };
 
