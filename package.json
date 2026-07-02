@@ -29,6 +29,7 @@
     "express": "^4.21.2",
     "firebase-admin": "^13.0.2",
     "pdfkit": "^0.19.1",
+    "pdfmake": "^0.3.11",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4"
   },

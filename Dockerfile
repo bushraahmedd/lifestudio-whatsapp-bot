@@ -29,6 +29,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY src ./src
+COPY assets ./assets
 
 # Persist WhatsApp session + optional volume mount at /app/.wwebjs_auth
 VOLUME ["/app/.wwebjs_auth"]
