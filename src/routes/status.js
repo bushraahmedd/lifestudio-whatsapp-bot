@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { getBotStatus } = require("../firestore/botState");
-const { ensureWhatsAppStarted, reconnectWhatsApp } = require("../bootstrap");
+const { ensureWhatsAppStarted, reconnectWhatsApp } = require("../whatsapp-lifecycle");
 const config = require("../config");
 
 const lazyStart = process.env.WHATSAPP_LAZY_START !== "false";
