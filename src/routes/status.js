@@ -6,6 +6,16 @@ const config = require("../config");
 
 const lazyStart = process.env.WHATSAPP_LAZY_START !== "false";
 
+function isLoggedOutMessage(message) {
+  const m = (message || "").toLowerCase();
+  return m.includes("خروج") || m.includes("qr") || m.includes("logged");
+}
+
+function shouldWakeBot(remote) {
+  if (remote.connected || remote.qrCode) return false;
+  return isLoggedOutMessage(remote.message) || !!remote.phoneNumber;
+}
+
 function withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
@@ -50,23 +60,32 @@ function createStatusRouter() {
     res.json({
       connected: !!remote.connected,
       qrCode: remote.qrCode || null,
-      phoneNumber: remote.phoneNumber || null,
+      phoneNumber: remote.connected ? remote.phoneNumber || null : null,
       provider: remote.provider || null,
       message,
       updatedAt: remote.updatedAt || null,
     });
 
-    // Start WhatsApp AFTER responding — avoids blocking / timing out the admin app
     if (lazyStart) {
       setImmediate(() => {
-        ensureWhatsAppStarted().catch((err) => {
-          console.error("[status] WhatsApp start:", err.message);
+        const action = shouldWakeBot(remote) ? reconnectWhatsApp() : ensureWhatsAppStarted();
+        action.catch((err) => {
+          console.error("[status] WhatsApp wake:", err.message);
         });
       });
     }
   });
 
   router.post("/reconnect", async (req, res) => {
+    res.json({ ok: true, message: "جاري إنشاء رمز QR جديد..." });
+    setImmediate(() => {
+      reconnectWhatsApp().catch((err) => {
+        console.error("[reconnect] failed:", err.message);
+      });
+    });
+  });
+
+  router.get("/reconnect", async (req, res) => {
     res.json({ ok: true, message: "جاري إنشاء رمز QR جديد..." });
     setImmediate(() => {
       reconnectWhatsApp().catch((err) => {

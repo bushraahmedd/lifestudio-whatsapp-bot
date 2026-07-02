@@ -1,43 +1,50 @@
-const { startBot, restartBot, getProvider } = require("./bot");
 const { createStatusRouter } = require("./routes/status");
-const { startWorkflowNotifier } = require("./listeners/workflowNotifier");
-const { startPhotographerNotifier } = require("./listeners/photographerNotifier");
 const { ensureFirebase } = require("./firebase/admin");
 
 let startPromise = null;
-let started = false;
 
 function mountApiRoutes(app) {
   app.use("/api", createStatusRouter());
 }
 
+async function writeBotStatus(patch) {
+  try {
+    ensureFirebase();
+    const { updateBotStatus } = require("./firestore/botState");
+    await updateBotStatus(patch);
+  } catch (err) {
+    console.error("writeBotStatus failed:", err.message);
+  }
+}
+
 async function ensureWhatsAppStarted() {
-  if (started) return;
   if (startPromise) return startPromise;
 
   startPromise = (async () => {
     console.log("Starting WhatsApp services...");
+    await writeBotStatus({
+      connected: false,
+      qrCode: null,
+      message: "جاري تشغيل واتساب...",
+    });
     ensureFirebase();
+    const { startBot, getProvider } = require("./bot");
     await startBot();
     const { sendText, phoneToChatId } = getProvider();
+    const { startWorkflowNotifier } = require("./listeners/workflowNotifier");
+    const { startPhotographerNotifier } = require("./listeners/photographerNotifier");
     startWorkflowNotifier(sendText, phoneToChatId);
     startPhotographerNotifier(sendText, phoneToChatId);
-    const { getConnectionState } = require("./bot");
-    console.log("WhatsApp bot started:", getConnectionState());
-    started = true;
-  })().catch((err) => {
+    console.log("WhatsApp services running");
+  })().catch(async (err) => {
     startPromise = null;
     console.error("WhatsApp start failed:", err.message);
-    try {
-      const { updateBotStatus } = require("./firestore/botState");
-      updateBotStatus({
-        connected: false,
-        qrCode: null,
-        message: `فشل تشغيل واتساب: ${err.message}`,
-      }).catch(() => {});
-    } catch {
-      // ignore
-    }
+    await writeBotStatus({
+      connected: false,
+      qrCode: null,
+      phoneNumber: null,
+      message: `فشل تشغيل واتساب: ${err.message}`,
+    });
     throw err;
   });
 
@@ -45,21 +52,28 @@ async function ensureWhatsAppStarted() {
 }
 
 function resetWhatsAppState() {
-  started = false;
   startPromise = null;
 }
 
 async function reconnectWhatsApp() {
   resetWhatsAppState();
+  await writeBotStatus({
+    connected: false,
+    qrCode: null,
+    phoneNumber: null,
+    provider: "baileys",
+    message: "جاري إنشاء رمز QR جديد...",
+  });
   ensureFirebase();
+  const { restartBot, getProvider } = require("./bot");
   await restartBot();
   const { sendText, phoneToChatId } = getProvider();
+  const { startWorkflowNotifier } = require("./listeners/workflowNotifier");
+  const { startPhotographerNotifier } = require("./listeners/photographerNotifier");
   startWorkflowNotifier(sendText, phoneToChatId);
   startPhotographerNotifier(sendText, phoneToChatId);
-  started = true;
 }
 
-/** @deprecated use ensureWhatsAppStarted */
 async function startServices() {
   return ensureWhatsAppStarted();
 }

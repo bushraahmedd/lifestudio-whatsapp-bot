@@ -125,7 +125,17 @@ function createBaileysProvider(onIncomingMessage) {
       printQRInTerminal: false,
       syncFullHistory: false,
       markOnlineOnConnect: true,
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
     });
+
+    setTimeout(() => {
+      if (starting && !connectionState.connected && !connectionState.qrCode) {
+        console.warn("[baileys] no QR after 90s — retrying");
+        starting = false;
+        start().catch(console.error);
+      }
+    }, 90000);
 
     sock.ev.on("creds.update", saveCreds);
 
