@@ -34,10 +34,11 @@ function createStatusRouter() {
   });
 
   router.get("/status", async (req, res) => {
-    const wakeBot = req.query.wakeBot === "1" || req.query.wakeBot === "true";
-    if (lazyStart && wakeBot) {
+    // Any authenticated status poll (admin app) starts WhatsApp.
+    // UptimeRobot should use /api/health only — it never hits this route.
+    if (lazyStart) {
       ensureWhatsAppStarted().catch((err) => {
-        console.error("[status] WhatsApp lazy start:", err.message);
+        console.error("[status] WhatsApp start:", err.message);
       });
     }
 
@@ -53,19 +54,15 @@ function createStatusRouter() {
     }
 
     let local = { connected: false, qrCode: null, phoneNumber: null, provider: null };
-    if (!lazyStart) {
-      try {
-        local = getConnectionState();
-      } catch {
-        // bot not loaded yet
-      }
+    try {
+      local = getConnectionState();
+    } catch {
+      // provider not loaded yet
     }
 
     let message = remote.message
-      || (local.connected ? "متصل" : lazyStart ? "جاري تشغيل البوت..." : "غير متصل");
-    if (lazyStart && !wakeBot && !remote.connected && !local.connected) {
-      message = remote.message || "البوت نائم — افتح لوحة التحكم لمسح QR";
-    }
+      || local.message
+      || (local.connected || remote.connected ? "متصل" : "جاري توليد رمز QR... انتظر 10–30 ثانية");
 
     res.json({
       connected: local.connected || remote.connected,

@@ -28,6 +28,16 @@ async function ensureWhatsAppStarted() {
   })().catch((err) => {
     startPromise = null;
     console.error("WhatsApp start failed:", err.message);
+    try {
+      const { updateBotStatus } = require("./firestore/botState");
+      updateBotStatus({
+        connected: false,
+        qrCode: null,
+        message: `فشل تشغيل واتساب: ${err.message}`,
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
     throw err;
   });
 
