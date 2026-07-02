@@ -53,6 +53,24 @@ Other variables are set in `render.yaml` (boss phones, API key, etc.).
 2. Admin → **إعدادات البوت** → paste URL + API key `live-studio-wa-2026-secret-key` → Save
 3. Open **بوت واتساب** → scan QR (WhatsApp → Linked Devices)
 
+## Keep server awake — UptimeRobot
+
+Render free sleeps after ~15 min with no traffic. Use [UptimeRobot](https://uptimerobot.com) (free plan = check every **5 minutes**).
+
+### Monitor — use `/api/health` only
+
+| Field | Value |
+|-------|--------|
+| **URL** | `https://live-studio-whatsapp-bot.onrender.com/api/health` |
+| **Type** | HTTP(s) |
+| **Interval** | 5 minutes |
+
+Do **not** use `/api/status` for UptimeRobot — it can be slow (WhatsApp/Firestore). `/api/health` responds in seconds and keeps Render awake.
+
+The admin app starts WhatsApp separately when you open **بوت واتساب**.
+
+**Limits:** UptimeRobot stops sleep but cannot fix Render free **RAM crashes** or **QR re-scan** after redeploy. WhatsApp may still drop if Baileys restarts.
+
 ## Free plan limits (important)
 
 | Issue | What happens |
