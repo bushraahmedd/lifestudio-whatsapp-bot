@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const { getConnectionState } = require("../bot");
 const { getBotStatus } = require("../firestore/botState");
 const { ensureWhatsAppStarted } = require("../bootstrap");
 const config = require("../config");
@@ -34,17 +33,9 @@ function createStatusRouter() {
   });
 
   router.get("/status", async (req, res) => {
-    // Any authenticated status poll (admin app) starts WhatsApp.
-    // UptimeRobot should use /api/health only — it never hits this route.
-    if (lazyStart) {
-      ensureWhatsAppStarted().catch((err) => {
-        console.error("[status] WhatsApp start:", err.message);
-      });
-    }
-
-    let remote = { connected: false, qrCode: null };
+    let remote = { connected: false, qrCode: null, message: "جاري التحميل..." };
     try {
-      remote = await withTimeout(getBotStatus(), 8000, "Firestore");
+      remote = await withTimeout(getBotStatus(), 5000, "Firestore");
     } catch (err) {
       remote = {
         connected: false,
@@ -53,25 +44,26 @@ function createStatusRouter() {
       };
     }
 
-    let local = { connected: false, qrCode: null, phoneNumber: null, provider: null };
-    try {
-      local = getConnectionState();
-    } catch {
-      // provider not loaded yet
-    }
-
-    let message = remote.message
-      || local.message
-      || (local.connected || remote.connected ? "متصل" : "جاري توليد رمز QR... انتظر 10–30 ثانية");
+    const message = remote.message
+      || (remote.connected ? "متصل" : "جاري توليد رمز QR... انتظر ثم حدّث");
 
     res.json({
-      connected: local.connected || remote.connected,
-      qrCode: local.qrCode || remote.qrCode || null,
-      phoneNumber: local.phoneNumber || remote.phoneNumber || null,
-      provider: local.provider || remote.provider || null,
+      connected: !!remote.connected,
+      qrCode: remote.qrCode || null,
+      phoneNumber: remote.phoneNumber || null,
+      provider: remote.provider || null,
       message,
       updatedAt: remote.updatedAt || null,
     });
+
+    // Start WhatsApp AFTER responding — avoids blocking / timing out the admin app
+    if (lazyStart) {
+      setImmediate(() => {
+        ensureWhatsAppStarted().catch((err) => {
+          console.error("[status] WhatsApp start:", err.message);
+        });
+      });
+    }
   });
 
   return router;
