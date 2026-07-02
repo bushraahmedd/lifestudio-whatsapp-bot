@@ -14,7 +14,8 @@
     "print-sa-b64": "node scripts/print-sa-b64.js",
     "save-b64-file": "node scripts/save-b64-file.js",
     "render-deploy": "node scripts/render-set-firebase.js",
-    "update-config": "node scripts/update-bot-config.js"
+    "update-config": "node scripts/update-bot-config.js",
+    "seed-packages": "node scripts/seed-packages.js"
   },
   "engines": {
     "node": ">=20"
@@ -27,6 +28,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "firebase-admin": "^13.0.2",
+    "pdfkit": "^0.19.1",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4"
   },

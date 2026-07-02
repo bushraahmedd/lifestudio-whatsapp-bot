@@ -1,7 +1,8 @@
 let Client;
 let LocalAuth;
+let MessageMedia;
 try {
-  ({ Client, LocalAuth } = require("whatsapp-web.js"));
+  ({ Client, LocalAuth, MessageMedia } = require("whatsapp-web.js"));
 } catch {
   throw new Error(
     "whatsapp-web.js is not installed. Run: npm install whatsapp-web.js (or use WHATSAPP_PROVIDER=baileys)"
@@ -30,6 +31,25 @@ function createWebJsProvider(onIncomingMessage) {
     }
     await client.sendMessage(chatId, text);
     await logWhatsAppEvent({ chatId, direction: "out", message: text });
+  }
+
+  async function sendDocument(chatId, buffer, fileName, options = {}) {
+    if (!client || !connectionState.connected) {
+      console.warn("[webjs] Cannot send document — disconnected");
+      return;
+    }
+    const media = new MessageMedia(
+      options.mimetype || "application/pdf",
+      buffer.toString("base64"),
+      fileName || "invoice.pdf"
+    );
+    await client.sendMessage(chatId, media, { caption: options.caption || "" });
+    await logWhatsAppEvent({
+      chatId,
+      direction: "out",
+      message: `[PDF] ${fileName}`,
+      meta: { type: "document" },
+    });
   }
 
   async function notifyOwner(text) {
@@ -108,6 +128,7 @@ function createWebJsProvider(onIncomingMessage) {
           body: hasMedia && !body ? "[صورة مرفقة]" : body,
           hasMedia,
           send: (text) => sendText(chatId, text),
+          sendDocument: (buf, name, opts) => sendDocument(chatId, buf, name, opts),
           notifyOwner,
         });
       } catch (err) {
@@ -123,6 +144,7 @@ function createWebJsProvider(onIncomingMessage) {
     start,
     getConnectionState,
     sendText,
+    sendDocument,
     phoneToChatId,
     notifyOwner,
   };

@@ -1,5 +1,12 @@
 const { STATES, MAIN_MENU_TEXT, normalizeInput, isBack } = require("./stateMachine");
-const { FEES_NOTE_DEFAULT, formatBankTransfer } = require("./messages");
+const { FEES_NOTE_DEFAULT, SOFT_HELP_TEXT, formatBankTransfer } = require("./messages");
+const { detectIntent, isAffirmative } = require("./intent");
+const {
+  buildPricingReply,
+  buildAmbiguousClarifier,
+  CATEGORY_META,
+} = require("./pricingMessages");
+const { getPackages } = require("../firestore/packages");
 const { getAvailability, isSlotAvailable } = require("../firestore/availability");
 const {
   createTentativeSession,
@@ -23,6 +30,7 @@ const {
   logWhatsAppEvent,
 } = require("../firestore/botState");
 const config = require("../config");
+const { sendInvoicePdfToClient } = require("../invoices/sendInvoicePdf");
 
 function isYes(text) {
   const t = normalizeInput(text);
@@ -66,6 +74,8 @@ async function handleIncomingMessage(ctx) {
     switch (state) {
       case STATES.MAIN_MENU:
         return handleMainMenu(ctx, text, data);
+      case STATES.INTENT_CLARIFY:
+        return handleIntentClarify(ctx, text, data);
       case STATES.BOOK_PICK_DATE:
         return handleBookPickDate(ctx, text, data);
       case STATES.BOOK_PICK_TIME:
@@ -114,24 +124,94 @@ async function handleIncomingMessage(ctx) {
 async function handleMainMenu(ctx, text, data) {
   const { chatId, send } = ctx;
   const choice = normalizeInput(text);
+  const detected = detectIntent(text);
 
-  if (choice === "1") {
-    const days = await getAvailability();
-    if (!days.length) {
-      await send("معذرة، ما فيش مواعيد فاضية هالفترة. تواصل مع الاستوديو على الطبيعة 🙏");
-      return;
-    }
-    const lines = days.slice(0, 10).map((d, i) => `*${i + 1}* — ${d.label} (${d.date}) — ${d.slots.length} موعد`);
-    await send(`📅 *المواعيد الفاضية*\n${lines.join("\n")}\n\nابعث رقم اليوم، أو *0* للرجوع`);
-    await setChatState(chatId, STATES.BOOK_PICK_DATE, { days: days.slice(0, 10) });
+  if (choice === "1" || choice === "حجز") return startBookFlow(ctx, { serviceCategory: data.lastCategory });
+  if (choice === "2" || choice === "الغاء" || choice === "إلغاء") return startCancelFlow(ctx);
+  if (choice === "3" || choice === "تغيير") return startRescheduleFlow(ctx);
+  if (choice === "4" || choice === "دفع") return startPayFlow(ctx);
+  if (choice === "5" || choice === "متابعة") return startTrackFlow(ctx);
+
+  if (/^(مرحبا|السلام|هلا|hello|hi|أهلا|اهلا)/.test(choice)) {
+    const botConfig = await getBotConfig();
+    await send(`${botConfig.greeting}\n\n${MAIN_MENU_TEXT}`);
     return;
   }
-  if (choice === "2") return startCancelFlow(ctx);
-  if (choice === "3") return startRescheduleFlow(ctx);
-  if (choice === "4") return startPayFlow(ctx);
-  if (choice === "5") return startTrackFlow(ctx);
 
-  await send("اختار رقم من 1 لـ 5، أو *0* للقائمة.");
+  if (detected.intent === "cancel") return startCancelFlow(ctx);
+  if (detected.intent === "pay") return startPayFlow(ctx);
+  if (detected.intent === "track") return startTrackFlow(ctx);
+
+  if (detected.intent === "pricing") {
+    if (detected.ambiguous) {
+      await send(await buildAmbiguousClarifier(detected.categories));
+      await setChatState(chatId, STATES.INTENT_CLARIFY, { pendingCategories: detected.categories });
+      return;
+    }
+    const cat = detected.categories[0];
+    await send(await buildPricingReply(cat));
+    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: cat });
+    return;
+  }
+
+  if (detected.intent === "book" || (isAffirmative(text) && data.lastCategory)) {
+    const cat = detected.categories[0] || data.lastCategory || null;
+    return startBookFlow(ctx, { serviceCategory: cat });
+  }
+
+  if (detected.categories.length === 1) {
+    await send(await buildPricingReply(detected.categories[0]));
+    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: detected.categories[0] });
+    return;
+  }
+
+  await send(SOFT_HELP_TEXT);
+}
+
+async function handleIntentClarify(ctx, text, data) {
+  const { chatId, send } = ctx;
+  const detected = detectIntent(text);
+
+  if (detected.intent === "book" || isAffirmative(text)) {
+    const cat = detected.categories[0] || data.pendingCategories?.[0] || null;
+    return startBookFlow(ctx, { serviceCategory: cat });
+  }
+
+  if (detected.categories.length === 1) {
+    const cat = detected.categories[0];
+    await send(await buildPricingReply(cat));
+    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: cat });
+    return;
+  }
+
+  if (detected.intent === "pricing" && !detected.ambiguous && detected.categories[0]) {
+    await send(await buildPricingReply(detected.categories[0]));
+    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: detected.categories[0] });
+    return;
+  }
+
+  await send(await buildAmbiguousClarifier(
+    detected.categories.length ? detected.categories : ["graduation", "studio_rental", "wedding"]
+  ));
+}
+
+async function startBookFlow(ctx, { serviceCategory } = {}) {
+  const { chatId, send } = ctx;
+  const days = await getAvailability();
+  if (!days.length) {
+    await send("معذرة، ما فيش مواعيد فاضية هالفترة. تواصل مع الاستوديو على الطبيعة 🙏");
+    return;
+  }
+  const catLabel = serviceCategory ? CATEGORY_META[serviceCategory]?.title : null;
+  const intro = catLabel
+    ? `📅 *حجز ${catLabel}* — اختار اليوم اللي يناسبك:`
+    : "📅 *المواعيد الفاضية* — اختار اليوم:";
+  const lines = days.slice(0, 10).map((d, i) => `*${i + 1}* — ${d.label} (${d.date}) — ${d.slots.length} موعد`);
+  await send(`${intro}\n${lines.join("\n")}\n\nابعث رقم اليوم، أو *0* للرجوع`);
+  await setChatState(chatId, STATES.BOOK_PICK_DATE, {
+    days: days.slice(0, 10),
+    serviceCategory: serviceCategory || null,
+  });
 }
 
 async function handleBookPickDate(ctx, text, data) {
@@ -162,10 +242,22 @@ async function handleBookPickTime(ctx, text, data) {
     return;
   }
   const botConfig = await getBotConfig();
-  const pkgs = botConfig.packages || [];
   const feesNote = botConfig.feesNote || FEES_NOTE_DEFAULT;
-  const lines = pkgs.map((p, i) => `*${i + 1}* — ${p.label} (${p.price} د.ل)`);
-  await send(`📦 *شنو نوع الجلسة؟*\n${lines.join("\n")}\n\n${feesNote}\n\nابعث رقم الباقة`);
+  const pkgs = await getPackages({
+    category: data.serviceCategory || undefined,
+  });
+  if (!pkgs.length) {
+    await send("ما لقيناش باقات منشورة لهالنوع — تواصل مع الاستوديو أو ابعث *0*.");
+    return;
+  }
+  const lines = pkgs.map((p, i) => {
+    let line = `*${i + 1}* — ${p.label}`;
+    if (p.hourlyRate) line += ` (${p.hourlyRate} د.ل/ساعة)`;
+    else if (p.dailyRate) line += ` (${p.dailyRate} د.ل/يوم)`;
+    else if (p.price) line += ` (${p.price} د.ل)`;
+    return line;
+  });
+  await send(`📦 *شنو الباقة اللي تناسبك؟*\n${lines.join("\n")}\n\n${feesNote}\n\nابعث رقم الباقة`);
   await setChatState(chatId, STATES.BOOK_PICK_PACKAGE, {
     ...data,
     selectedTime: slot.time,
@@ -186,7 +278,7 @@ async function handleBookPickPackage(ctx, text, data) {
     ...data,
     packageId: pkg.id,
     packageLabel: pkg.label,
-    totalPrice: pkg.price,
+    totalPrice: pkg.price || pkg.hourlyRate || pkg.dailyRate || 0,
   });
 }
 
@@ -310,10 +402,16 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
     `🎉 *تم الحجز في النظام!*\nرقم الجلسة: ${session.id.slice(-6).toUpperCase()}\nالحالة: *مبدئي — مستنّين تأكيد الاستوديو*\n\n${formatInvoiceMessage(invoice)}`
   );
 
+  await sendInvoicePdfToClient(ctx, invoice, {
+    date: data.selectedDate,
+    time: data.selectedTime,
+    location: data.location,
+  });
+
   if (data.paymentMethod === "تحويل") {
-    await send("لو حولت، ابعث صورة الإيصال من القائمة (*0* ثم *4*).");
+    await send("لو حولت، ابعث صورة الإيصال هنا أو اكتب *دفع*.");
   } else if (data.paymentType !== "full") {
-    await send("للدفع ابعث *4* من القائمة (*0* ثم *4*).");
+    await send("للدفع اكتب *دفع* في أي وقت.");
   }
 
   if (data.paymentType === "full" && session.photographers?.length > 0) {

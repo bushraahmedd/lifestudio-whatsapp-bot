@@ -52,6 +52,26 @@ function createBaileysProvider(onIncomingMessage) {
     await logWhatsAppEvent({ chatId: jid, direction: "out", message: text });
   }
 
+  async function sendDocument(chatId, buffer, fileName, options = {}) {
+    if (!sock || !connectionState.connected) {
+      console.warn("[baileys] Cannot send document — disconnected");
+      return;
+    }
+    const jid = chatId.includes("@") ? chatId : phoneToChatId(chatId);
+    await sock.sendMessage(jid, {
+      document: buffer,
+      mimetype: options.mimetype || "application/pdf",
+      fileName: fileName || "invoice.pdf",
+      caption: options.caption || "",
+    });
+    await logWhatsAppEvent({
+      chatId: jid,
+      direction: "out",
+      message: `[PDF] ${fileName}`,
+      meta: { type: "document" },
+    });
+  }
+
   async function notifyOwner(text) {
     const botConfig = await getBotConfig();
     const phones = [...new Set(
@@ -209,6 +229,7 @@ function createBaileysProvider(onIncomingMessage) {
             body: hasMedia && !body ? "[صورة مرفقة]" : body,
             hasMedia,
             send: (text) => sendText(chatId, text),
+            sendDocument: (buf, name, opts) => sendDocument(chatId, buf, name, opts),
             notifyOwner,
           });
         } catch (err) {
@@ -224,6 +245,7 @@ function createBaileysProvider(onIncomingMessage) {
     restart,
     getConnectionState,
     sendText,
+    sendDocument,
     phoneToChatId,
     notifyOwner,
   };
