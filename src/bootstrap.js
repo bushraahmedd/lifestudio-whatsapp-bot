@@ -1,4 +1,4 @@
-const { startBot, getProvider } = require("./bot");
+const { startBot, restartBot, getProvider } = require("./bot");
 const { createStatusRouter } = require("./routes/status");
 const { startWorkflowNotifier } = require("./listeners/workflowNotifier");
 const { startPhotographerNotifier } = require("./listeners/photographerNotifier");
@@ -44,9 +44,24 @@ async function ensureWhatsAppStarted() {
   return startPromise;
 }
 
+function resetWhatsAppState() {
+  started = false;
+  startPromise = null;
+}
+
+async function reconnectWhatsApp() {
+  resetWhatsAppState();
+  ensureFirebase();
+  await restartBot();
+  const { sendText, phoneToChatId } = getProvider();
+  startWorkflowNotifier(sendText, phoneToChatId);
+  startPhotographerNotifier(sendText, phoneToChatId);
+  started = true;
+}
+
 /** @deprecated use ensureWhatsAppStarted */
 async function startServices() {
   return ensureWhatsAppStarted();
 }
 
-module.exports = { mountApiRoutes, ensureWhatsAppStarted, startServices };
+module.exports = { mountApiRoutes, ensureWhatsAppStarted, reconnectWhatsApp, startServices };

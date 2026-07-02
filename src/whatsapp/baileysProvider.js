@@ -4,6 +4,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
 } = require("@whiskeysockets/baileys");
+const fs = require("fs");
 const qrcode = require("qrcode");
 const pino = require("pino");
 const config = require("../config");
@@ -71,9 +72,48 @@ function createBaileysProvider(onIncomingMessage) {
     return { ...connectionState };
   }
 
+  function clearAuthDir() {
+    try {
+      fs.rmSync(config.baileysAuthPath, { recursive: true, force: true });
+    } catch (err) {
+      console.warn("[baileys] clear auth:", err.message);
+    }
+  }
+
+  async function restart() {
+    starting = false;
+    if (sock) {
+      try {
+        sock.end(undefined);
+      } catch {
+        // ignore
+      }
+      sock = null;
+    }
+    clearAuthDir();
+    connectionState = { connected: false, qrCode: null, phoneNumber: null, provider: "baileys" };
+    await updateBotStatus({
+      connected: false,
+      qrCode: null,
+      phoneNumber: null,
+      provider: "baileys",
+      message: "جاري توليد رمز QR جديد...",
+    });
+    await start();
+  }
+
   async function start() {
     if (starting) return;
     starting = true;
+
+    if (sock) {
+      try {
+        sock.end(undefined);
+      } catch {
+        // ignore
+      }
+      sock = null;
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState(config.baileysAuthPath);
     const { version } = await fetchLatestBaileysVersion();
@@ -132,7 +172,10 @@ function createBaileysProvider(onIncomingMessage) {
           message: loggedOut ? "تم تسجيل الخروج — امسح QR مجدداً" : "إعادة الاتصال...",
         });
         starting = false;
-        if (!loggedOut) {
+        if (loggedOut) {
+          clearAuthDir();
+          setTimeout(() => start().catch(console.error), 3000);
+        } else {
           setTimeout(() => start().catch(console.error), 5000);
         }
       }
@@ -168,6 +211,7 @@ function createBaileysProvider(onIncomingMessage) {
   return {
     name: "baileys",
     start,
+    restart,
     getConnectionState,
     sendText,
     phoneToChatId,

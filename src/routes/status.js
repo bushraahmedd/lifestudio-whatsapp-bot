@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { getBotStatus } = require("../firestore/botState");
-const { ensureWhatsAppStarted } = require("../bootstrap");
+const { ensureWhatsAppStarted, reconnectWhatsApp } = require("../bootstrap");
 const config = require("../config");
 
 const lazyStart = process.env.WHATSAPP_LAZY_START !== "false";
@@ -64,6 +64,15 @@ function createStatusRouter() {
         });
       });
     }
+  });
+
+  router.post("/reconnect", async (req, res) => {
+    res.json({ ok: true, message: "جاري إنشاء رمز QR جديد..." });
+    setImmediate(() => {
+      reconnectWhatsApp().catch((err) => {
+        console.error("[reconnect] failed:", err.message);
+      });
+    });
   });
 
   return router;

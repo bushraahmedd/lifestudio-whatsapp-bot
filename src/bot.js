@@ -16,6 +16,16 @@ async function startBot() {
   await p.start();
 }
 
+async function restartBot() {
+  const p = getProvider();
+  if (typeof p.restart === "function") {
+    console.log("Restarting WhatsApp provider...");
+    await p.restart();
+  } else {
+    await p.start();
+  }
+}
+
 function getConnectionState() {
   return getProvider().getConnectionState();
 }
@@ -34,6 +44,7 @@ function phoneToChatId(phone) {
 
 module.exports = {
   startBot,
+  restartBot,
   getConnectionState,
   sendText,
   notifyOwner,
