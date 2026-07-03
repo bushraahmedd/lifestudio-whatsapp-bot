@@ -1,13 +1,21 @@
 const { STATES, MAIN_MENU_TEXT, normalizeInput, isBack } = require("./stateMachine");
 const { FEES_NOTE_DEFAULT, SOFT_HELP_TEXT, formatBankTransfer } = require("./messages");
 const { detectIntent, isAffirmative } = require("./intent");
+const { matchSinglePackage } = require("./packageMatcher");
+const { buildSinglePackageReply, buildCategoryHint } = require("./packageReplies");
+const { parseDateTime } = require("./dateParser");
 const {
-  buildPricingReply,
   buildAmbiguousClarifier,
   CATEGORY_META,
 } = require("./pricingMessages");
-const { getPackages } = require("../firestore/packages");
-const { getAvailability, isSlotAvailable } = require("../firestore/availability");
+const { getPackages, getPackageById } = require("../firestore/packages");
+const {
+  getAvailability,
+  getAvailabilityForDate,
+  getNearbyAvailability,
+  formatSlotsList,
+  isSlotAvailable,
+} = require("../firestore/availability");
 const {
   createTentativeSession,
   getSessionsByPhone,
@@ -35,6 +43,56 @@ const { sendInvoicePdfToClient } = require("../invoices/sendInvoicePdf");
 function isYes(text) {
   const t = normalizeInput(text);
   return ["نعم", "أيوه", "ايوه", "ايه", "أيه", "yes", "ok", "تأكيد", "1"].includes(t);
+}
+
+async function continueBookingAfterSlot(ctx, data) {
+  const { chatId, send } = ctx;
+  if (data.packageId || data.selectedPackageId) {
+    const pkgId = data.packageId || data.selectedPackageId;
+    const pkg = data.packages?.find((p) => p.id === pkgId) || (await getPackageById(pkgId));
+    await send("👤 شنو *اسمك الكامل*؟");
+    await setChatState(chatId, STATES.BOOK_CLIENT_NAME, {
+      ...data,
+      packageId: pkgId,
+      packageLabel: data.packageLabel || pkg?.label,
+      totalPrice: data.totalPrice || pkg?.price || 0,
+    });
+    return;
+  }
+  const pkgs = data.packages?.length
+    ? data.packages
+    : await getPackages({ category: data.serviceCategory || undefined });
+  if (pkgs.length === 1) {
+    const pkg = pkgs[0];
+    await send("👤 شنو *اسمك الكامل*؟");
+    await setChatState(chatId, STATES.BOOK_CLIENT_NAME, {
+      ...data,
+      packageId: pkg.id,
+      packageLabel: pkg.label,
+      totalPrice: pkg.price || 0,
+    });
+    return;
+  }
+  const lines = pkgs.map((p, i) => `*${i + 1}* — ${p.label} (${p.price} د.ل)`);
+  await send(`📦 *شنو الباقة؟*\n${lines.join("\n")}\n\nابعث رقم الباقة`);
+  await setChatState(chatId, STATES.BOOK_PICK_PACKAGE, { ...data, packages: pkgs });
+}
+
+async function handleSlotRequest(ctx, date, time, data) {
+  const { chatId, send } = ctx;
+  const ok = await isSlotAvailable(date, time);
+  if (!ok) {
+    const nearby = await getNearbyAvailability(date, 4);
+    await send(
+      `نعتذر منك 🙏 هذا الموعد *${date}* الساعة *${time}* محجوز مسبقاً.\n\n` +
+      `القائمة التالية تحتوي على الأوقات المتاحة في نفس اليوم أو الأيام القريبة — هل يناسبك أحدها؟\n\n` +
+      `${formatSlotsList(nearby)}\n\nابعث رقم اليوم أو *0* للقائمة.`
+    );
+    await setChatState(chatId, STATES.BOOK_PICK_DATE, { ...data, days: nearby });
+    return;
+  }
+  await send(`تمام! الموعد *${date}* الساعة *${time}* متاح ✅ نكمل معاك الحجز.`);
+  await continueBookingAfterSlot(ctx, { ...data, selectedDate: date, selectedTime: time });
 }
 
 /**
@@ -126,7 +184,45 @@ async function handleMainMenu(ctx, text, data) {
   const choice = normalizeInput(text);
   const detected = detectIntent(text);
 
-  if (choice === "1" || choice === "حجز") return startBookFlow(ctx, { serviceCategory: data.lastCategory });
+  const parsed = parseDateTime(text);
+  if (parsed.date && parsed.time) {
+    return handleSlotRequest(ctx, parsed.date, parsed.time, data);
+  }
+  if (parsed.date) {
+    const day = await getAvailabilityForDate(parsed.date);
+    if (!day.slots.length) {
+      const nearby = await getNearbyAvailability(parsed.date, 4);
+      await send(
+        `نعتذر منك، يوم *${parsed.date}* محجوز بالكامل.\n\n${formatSlotsList(nearby)}\n\nابعث رقم اليوم المناسب.`
+      );
+      await setChatState(chatId, STATES.BOOK_PICK_DATE, { ...data, days: nearby });
+      return;
+    }
+    const lines = day.slots.slice(0, 12).map((s, i) => `*${i + 1}* — ${s.time}`);
+    await send(`مواعيد *${day.label}* (${day.date}):\n${lines.join("\n")}\n\nابعث رقم الوقت`);
+    await setChatState(chatId, STATES.BOOK_PICK_TIME, {
+      ...data,
+      selectedDate: day.date,
+      slots: day.slots.slice(0, 12),
+    });
+    return;
+  }
+
+  const matched = await matchSinglePackage(text);
+  if (matched) {
+    await send(await buildSinglePackageReply(matched.package, matched.category));
+    await setChatState(chatId, STATES.MAIN_MENU, {
+      ...data,
+      lastCategory: matched.category,
+      selectedPackageId: matched.package.id,
+      packageLabel: matched.package.label,
+      totalPrice: matched.package.price || 0,
+      packages: [matched.package],
+    });
+    return;
+  }
+
+  if (choice === "1" || choice === "حجز") return startBookFlow(ctx, { serviceCategory: data.lastCategory, packages: data.packages });
   if (choice === "2" || choice === "الغاء" || choice === "إلغاء") return startCancelFlow(ctx);
   if (choice === "3" || choice === "تغيير") return startRescheduleFlow(ctx);
   if (choice === "4" || choice === "دفع") return startPayFlow(ctx);
@@ -149,18 +245,24 @@ async function handleMainMenu(ctx, text, data) {
       return;
     }
     const cat = detected.categories[0];
-    await send(await buildPricingReply(cat));
+    await send(await buildCategoryHint(cat));
     await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: cat });
     return;
   }
 
-  if (detected.intent === "book" || (isAffirmative(text) && data.lastCategory)) {
+  if (detected.intent === "book" || (isAffirmative(text) && (data.lastCategory || data.selectedPackageId))) {
     const cat = detected.categories[0] || data.lastCategory || null;
-    return startBookFlow(ctx, { serviceCategory: cat });
+    return startBookFlow(ctx, {
+      serviceCategory: cat,
+      packages: data.packages,
+      selectedPackageId: data.selectedPackageId,
+      packageLabel: data.packageLabel,
+      totalPrice: data.totalPrice,
+    });
   }
 
   if (detected.categories.length === 1) {
-    await send(await buildPricingReply(detected.categories[0]));
+    await send(await buildCategoryHint(detected.categories[0]));
     await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: detected.categories[0] });
     return;
   }
@@ -172,31 +274,45 @@ async function handleIntentClarify(ctx, text, data) {
   const { chatId, send } = ctx;
   const detected = detectIntent(text);
 
-  if (detected.intent === "book" || isAffirmative(text)) {
-    const cat = detected.categories[0] || data.pendingCategories?.[0] || null;
-    return startBookFlow(ctx, { serviceCategory: cat });
-  }
-
-  if (detected.categories.length === 1) {
-    const cat = detected.categories[0];
-    await send(await buildPricingReply(cat));
-    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: cat });
+  const matched = await matchSinglePackage(text);
+  if (matched) {
+    await send(await buildSinglePackageReply(matched.package, matched.category));
+    await setChatState(chatId, STATES.MAIN_MENU, {
+      ...data,
+      lastCategory: matched.category,
+      selectedPackageId: matched.package.id,
+      packageLabel: matched.package.label,
+      totalPrice: matched.package.price || 0,
+      packages: [matched.package],
+    });
     return;
   }
 
-  if (detected.intent === "pricing" && !detected.ambiguous && detected.categories[0]) {
-    await send(await buildPricingReply(detected.categories[0]));
+  if (detected.intent === "book" || isAffirmative(text)) {
+    const cat = detected.categories[0] || data.pendingCategories?.[0] || null;
+    return startBookFlow(ctx, { serviceCategory: cat, packages: data.packages });
+  }
+
+  if (detected.categories.length === 1) {
+    await send(await buildCategoryHint(detected.categories[0]));
     await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: detected.categories[0] });
     return;
   }
 
   await send(await buildAmbiguousClarifier(
-    detected.categories.length ? detected.categories : ["wedding", "graduation", "equipment"]
+    detected.categories.length ? detected.categories : ["wedding", "graduation", "birthday"]
   ));
 }
 
-async function startBookFlow(ctx, { serviceCategory } = {}) {
+async function startBookFlow(ctx, opts = {}) {
   const { chatId, send } = ctx;
+  const {
+    serviceCategory,
+    packages,
+    selectedPackageId,
+    packageLabel,
+    totalPrice,
+  } = opts;
   const days = await getAvailability();
   if (!days.length) {
     await send("معذرة، ما فيش مواعيد فاضية هالفترة. تواصل مع الاستوديو على الطبيعة 🙏");
@@ -204,65 +320,67 @@ async function startBookFlow(ctx, { serviceCategory } = {}) {
   }
   const catLabel = serviceCategory ? CATEGORY_META[serviceCategory]?.title : null;
   const intro = catLabel
-    ? `📅 *حجز ${catLabel}* — اختار اليوم اللي يناسبك:`
-    : "📅 *المواعيد الفاضية* — اختار اليوم:";
+    ? `📅 *حجز ${catLabel}* — اختار اليوم أو ابعت التاريخ والوقت مباشرة:`
+    : "📅 *المواعيد الفاضية* — اختار اليوم أو ابعت التاريخ:";
   const lines = days.slice(0, 10).map((d, i) => `*${i + 1}* — ${d.label} (${d.date}) — ${d.slots.length} موعد`);
   await send(`${intro}\n${lines.join("\n")}\n\nابعث رقم اليوم، أو *0* للرجوع`);
   await setChatState(chatId, STATES.BOOK_PICK_DATE, {
     days: days.slice(0, 10),
     serviceCategory: serviceCategory || null,
+    packages: packages || null,
+    selectedPackageId: selectedPackageId || null,
+    packageLabel: packageLabel || null,
+    totalPrice: totalPrice || null,
   });
 }
 
 async function handleBookPickDate(ctx, text, data) {
   const { chatId, send } = ctx;
+  let day;
   const idx = parseInt(text, 10) - 1;
-  const day = data.days?.[idx];
+  if (!Number.isNaN(idx) && data.days?.[idx]) {
+    day = data.days[idx];
+  } else {
+    const parsed = parseDateTime(text);
+    if (parsed.date) {
+      day = await getAvailabilityForDate(parsed.date);
+      if (!day.slots.length) {
+        const nearby = await getNearbyAvailability(parsed.date, 4);
+        await send(
+          `نعتذر منك، يوم *${parsed.date}* محجوز.\n\n${formatSlotsList(nearby)}\n\nاختار يوماً من القائمة.`
+        );
+        await setChatState(chatId, STATES.BOOK_PICK_DATE, { ...data, days: nearby });
+        return;
+      }
+    }
+  }
   if (!day) {
-    await send("الرقم مو صحيح. ابعث رقم اليوم من القائمة.");
+    await send("الرقم أو التاريخ مو صحيح. ابعث رقم اليوم من القائمة أو تاريخ مثل 15/6.");
     return;
   }
   const slots = day.slots.slice(0, 12);
   const lines = slots.map((s, i) => `*${i + 1}* — ${s.time}`);
-  await send(`⏰ مواعيد *${day.label}*\n${lines.join("\n")}\n\nابعث رقم الوقت`);
+  await send(`⏰ مواعيد *${day.label}*\n${lines.join("\n")}\n\nابعث رقم الوقت أو اكتب الساعة (مثلاً 10:00)`);
   await setChatState(chatId, STATES.BOOK_PICK_TIME, { ...data, selectedDate: day.date, slots });
 }
 
 async function handleBookPickTime(ctx, text, data) {
   const { chatId, send } = ctx;
+  let slot;
   const idx = parseInt(text, 10) - 1;
-  const slot = data.slots?.[idx];
-  if (!slot) {
-    await send("رقم غير صحيح.");
+  if (!Number.isNaN(idx) && data.slots?.[idx]) {
+    slot = data.slots[idx];
+  } else {
+    const parsed = parseDateTime(text);
+    if (parsed.time) {
+      slot = { time: parsed.time };
+    }
+  }
+  if (!slot?.time) {
+    await send("رقم أو وقت غير صحيح. ابعث رقم الوقت أو مثلاً *14:00*.");
     return;
   }
-  const ok = await isSlotAvailable(data.selectedDate, slot.time);
-  if (!ok) {
-    await send("⚠️ للأسف الموعد انحجز توا. ابعث *0* واختار موعد ثاني.");
-    return;
-  }
-  const botConfig = await getBotConfig();
-  const feesNote = botConfig.feesNote || FEES_NOTE_DEFAULT;
-  const pkgs = await getPackages({
-    category: data.serviceCategory || undefined,
-  });
-  if (!pkgs.length) {
-    await send("ما لقيناش باقات منشورة لهالنوع — تواصل مع الاستوديو أو ابعث *0*.");
-    return;
-  }
-  const lines = pkgs.map((p, i) => {
-    let line = `*${i + 1}* — ${p.label}`;
-    if (p.hourlyRate) line += ` (${p.hourlyRate} د.ل/ساعة)`;
-    else if (p.dailyRate) line += ` (${p.dailyRate} د.ل/يوم)`;
-    else if (p.price) line += ` (${p.price} د.ل)`;
-    return line;
-  });
-  await send(`📦 *شنو الباقة اللي تناسبك؟*\n${lines.join("\n")}\n\n${feesNote}\n\nابعث رقم الباقة`);
-  await setChatState(chatId, STATES.BOOK_PICK_PACKAGE, {
-    ...data,
-    selectedTime: slot.time,
-    packages: pkgs,
-  });
+  return handleSlotRequest(ctx, data.selectedDate, slot.time, data);
 }
 
 async function handleBookPickPackage(ctx, text, data) {

@@ -94,8 +94,68 @@ async function isSlotAvailable(date, time) {
   );
 }
 
+/**
+ * Returns open slots for one date (or empty slots array if fully booked).
+ */
+async function getAvailabilityForDate(dateKey) {
+  const allSlots = generateTimeSlots();
+  const booked = await getBookedSessions(dateKey, dateKey);
+  const taken = booked.map((s) => s.time || "09:00");
+  const slots = allSlots
+    .map((time) => ({
+      time,
+      available: !taken.some((t) => timesOverlap(t, time, config.scheduling.sessionDurationMinutes)),
+    }))
+    .filter((s) => s.available);
+  const d = new Date(`${dateKey}T12:00:00`);
+  return {
+    date: dateKey,
+    label: formatArabicDate(d),
+    slots,
+  };
+}
+
+/**
+ * Same day first, then nearby days with open slots.
+ */
+async function getNearbyAvailability(targetDate, radiusDays = 3) {
+  const all = await getAvailability(config.scheduling.daysAhead);
+  const sameDay = all.find((d) => d.date === targetDate);
+  const ordered = [];
+  if (sameDay?.slots?.length) ordered.push(sameDay);
+
+  const target = new Date(`${targetDate}T12:00:00`);
+  const rest = all
+    .filter((d) => d.date !== targetDate)
+    .map((d) => ({
+      ...d,
+      dist: Math.abs(new Date(`${d.date}T12:00:00`) - target),
+    }))
+    .sort((a, b) => a.dist - b.dist);
+
+  for (const d of rest) {
+    if (ordered.length >= radiusDays + 1) break;
+    ordered.push(d);
+  }
+  return ordered.slice(0, 8);
+}
+
+function formatSlotsList(days) {
+  if (!days.length) return "للأسف ما لقيناش مواعيد قريبة — تواصل مع الاستوديو مباشرة 🙏";
+  return days
+    .slice(0, 6)
+    .map((d, i) => {
+      const times = d.slots.slice(0, 6).map((s) => s.time).join("، ");
+      return `*${i + 1}* — ${d.label} (${d.date})\n   ${times}`;
+    })
+    .join("\n\n");
+}
+
 module.exports = {
   getAvailability,
+  getAvailabilityForDate,
+  getNearbyAvailability,
+  formatSlotsList,
   isSlotAvailable,
   getBookedSessions,
   toDateKey,
