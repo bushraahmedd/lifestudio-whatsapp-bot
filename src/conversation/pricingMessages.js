@@ -43,9 +43,12 @@ function formatPackageLine(pkg, index) {
   let line = `${n}*${pkg.label}*`;
   if (pkg.hourlyRate) line += ` — ${pkg.hourlyRate} د.ل / ساعة`;
   else if (pkg.dailyRate) line += ` — ${pkg.dailyRate} د.ل / يوم`;
-  else if (pkg.price) line += ` — *${Number(pkg.price).toLocaleString()} د.ل*`;
+  else if (pkg.price != null) line += ` — *${Number(pkg.price).toLocaleString()} د.ل*`;
   if (pkg.description) line += `\n   ${pkg.description}`;
-  if (pkg.includes?.length) line += `\n   يشمل: ${pkg.includes.join("، ")}`;
+  if (pkg.includes?.length) {
+    const uniq = [...new Set(pkg.includes)];
+    line += `\n   يشمل: ${uniq.join("، ")}`;
+  }
   if (pkg.equipment) line += `\n   التجهيزات: ${pkg.equipment}`;
   if (pkg.terms) line += `\n   الشروط: ${pkg.terms}`;
   return line;

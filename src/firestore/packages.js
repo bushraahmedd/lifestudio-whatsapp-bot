@@ -260,6 +260,16 @@ const SERVICE_CATEGORIES = [
   "family",
 ];
 
+function dedupePackageList(items) {
+  const seen = new Set();
+  return items.filter((p) => {
+    const key = `${(p.label || "").trim().toLowerCase()}|${Number(p.price) || 0}|${p.category || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function getPackages({ category, activeOnly = true } = {}) {
   let snap;
   if (category) {
@@ -277,7 +287,7 @@ async function getPackages({ category, activeOnly = true } = {}) {
     items = DEFAULT_PACKAGES.map((p) => ({ ...p }));
   }
 
-  return items.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  return dedupePackageList(items).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 }
 
 async function getPackageById(id) {

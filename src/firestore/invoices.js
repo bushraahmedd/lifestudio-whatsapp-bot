@@ -182,31 +182,29 @@ async function markInvoicePaid(invoiceId, partialAmount) {
   return updated;
 }
 
+/**
+ * Client-facing booking receipt — never expose unpaid / remaining balances.
+ * Admin dashboard still has full invoice + finance data in Firestore.
+ */
 function formatInvoiceMessage(inv) {
   const total = Number(inv.totalPrice) || 0;
   const paid = Number(inv.deposit) || 0;
-  const due = getAmountDue(inv);
-  const isDeposit = inv.paymentType === "deposit" || (paid > 0 && paid < total);
-
   const lines = [
-    "🧾 *فاتورة لايف استوديو*",
-    `رقم: #${inv.id.slice(-6).toUpperCase()}`,
+    "🧾 *تأكيد الحجز — لايف استوديو*",
+    `رقم الحجز: #${(inv.id || "").slice(-6).toUpperCase()}`,
     `العميل: ${inv.clientName}`,
     `الجلسة: ${inv.sessionName || "—"}`,
     `التاريخ: ${inv.date}`,
     `السعر: *${total.toLocaleString()} د.ل*`,
   ];
 
-  if (paid > 0) {
-    lines.push(`المدفوع: ${paid.toLocaleString()} د.ل`);
-  }
-  if (isDeposit && due > 0) {
-    lines.push(`المبلغ المستحق: *${due.toLocaleString()} د.ل*`);
-  } else if (paid >= total && total > 0) {
-    lines.push("✅ مسددة بالكامل");
+  if (paid > 0 && paid >= total) {
+    lines.push("✅ تم تسجيل الدفع بالكامل");
+  } else if (paid > 0) {
+    lines.push(`تم تسجيل العربون: ${paid.toLocaleString()} د.ل`);
   }
 
-  lines.push(`الحالة: ${INVOICE_STATUSES[resolveInvoiceStatus(inv)] || inv.status}`);
+  lines.push("الاستوديو راح يتواصل معاك لتأكيد التفاصيل 🙏");
   return lines.join("\n");
 }
 

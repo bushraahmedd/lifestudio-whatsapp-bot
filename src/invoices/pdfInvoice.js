@@ -54,8 +54,8 @@ async function generateInvoicePdf(invoice, session = {}) {
 
   const total = Number(invoice.totalPrice) || 0;
   const paid = Number(invoice.deposit) || 0;
-  const due = Math.max(0, total - paid);
-  const showDue = due > 0 && (invoice.paymentType === "deposit" || invoice.paymentType === "booking" || paid < total);
+  // Client PDF: never show unpaid / remaining balance
+  const fullyPaid = paid > 0 && paid >= total;
   const invNo = `#INV-${(invoice.id || "").slice(-8).toUpperCase() || "--------"}`;
   const logo = logoImage();
 
@@ -149,39 +149,36 @@ async function generateInvoicePdf(invoice, session = {}) {
       {
         columns: [
           { text: `${total.toLocaleString()} ${t("د.ل")}`, alignment: "left", width: "*" },
-          { text: t("إجمالي القيمة:"), color: "#666666", width: "auto" },
+          { text: t("السعر:"), color: "#666666", width: "auto" },
         ],
         margin: [0, 4, 0, 4],
       },
-      ...(paid > 0
+      ...(paid > 0 && paid < total
         ? [{
             columns: [
               { text: `${paid.toLocaleString()} ${t("د.ل")}`, alignment: "left", width: "*", bold: true, color: "#27ae60" },
-              { text: t("المبلغ المدفوع:"), bold: true, color: "#27ae60", width: "auto" },
+              { text: t("العربون المسجّل:"), bold: true, color: "#27ae60", width: "auto" },
             ],
             margin: [0, 4, 0, 4],
           }]
         : []),
-      showDue
+      fullyPaid
         ? {
-            table: {
-              widths: ["*", "auto"],
-              body: [[
-                { text: `${due.toLocaleString()} ${t("د.ل")}`, bold: true, fontSize: 14, color: "#ffffff", alignment: "left" },
-                { text: t("المبلغ المستحق:"), bold: true, fontSize: 14, color: "#ffffff", alignment: "right" },
-              ]],
-            },
-            layout: "noBorders",
-            fillColor: BRAND.color,
-            margin: [0, 8, 0, 0],
-          }
-        : {
             text: t("تم الدفع بالكامل"),
             alignment: "center",
             bold: true,
             fontSize: 14,
             color: "#ffffff",
             fillColor: "#27ae60",
+            margin: [0, 8, 0, 0],
+          }
+        : {
+            text: t("تم تسجيل الحجز — شكراً لثقتكم"),
+            alignment: "center",
+            bold: true,
+            fontSize: 12,
+            color: "#ffffff",
+            fillColor: BRAND.color,
             margin: [0, 8, 0, 0],
           },
     ],

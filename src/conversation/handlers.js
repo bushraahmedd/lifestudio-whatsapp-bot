@@ -1,5 +1,6 @@
 const { STATES, MAIN_MENU_TEXT, normalizeInput, isBack } = require("./stateMachine");
-const { FEES_NOTE_DEFAULT, SOFT_HELP_TEXT, formatBankTransfer } = require("./messages");
+const { formatBankTransfer } = require("./messages");
+const { SOFT_HELP_TEXT } = require("./messages");
 const { detectIntent, isAffirmative } = require("./intent");
 const { matchSinglePackage } = require("./packageMatcher");
 const { buildSinglePackageReply, buildCategoryHint } = require("./packageReplies");
@@ -228,7 +229,7 @@ async function handleMainMenu(ctx, text, data) {
   if (choice === "4" || choice === "دفع") return startPayFlow(ctx);
   if (choice === "5" || choice === "متابعة") return startTrackFlow(ctx);
 
-  if (/^(مرحبا|السلام|هلا|hello|hi|أهلا|اهلا)/.test(choice)) {
+  if (/^(مرحبا|السلام|هلا|hello|hi|أهلا|اهلا|مساعدة|help)/.test(choice)) {
     const botConfig = await getBotConfig();
     await send(`${botConfig.greeting}\n\n${MAIN_MENU_TEXT}`);
     return;
@@ -517,7 +518,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
   });
 
   await send(
-    `🎉 *تم الحجز في النظام!*\nرقم الجلسة: ${session.id.slice(-6).toUpperCase()}\nالحالة: *مبدئي — مستنّين تأكيد الاستوديو*\n\n${formatInvoiceMessage(invoice)}`
+    `🎉 *تم الحجز بنجاح!*\nرقم الجلسة: ${session.id.slice(-6).toUpperCase()}\n\n${formatInvoiceMessage(invoice)}`
   );
 
   await sendInvoicePdfToClient(ctx, invoice, {
@@ -527,14 +528,12 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
   });
 
   if (data.paymentMethod === "تحويل") {
-    await send("لو حولت، ابعث صورة الإيصال هنا أو اكتب *دفع*.");
-  } else if (data.paymentType !== "full") {
-    await send("للدفع اكتب *دفع* في أي وقت.");
+    await send("لو حولت، ابعت صورة الإيصال هنا متى ما تبي 🙏");
   }
 
   if (data.paymentType === "full" && session.photographers?.length > 0) {
     await confirmSession(session.id);
-    await send("✅ تم تأكيد الحجز بعد الدفع الكامل. المصورين اتنبّهوا.");
+    await send("✅ تم تأكيد الحجز. المصورين اتنبّهوا.");
   } else if (data.paymentType === "full") {
     await send("✅ تم تسجيل الدفع. الإدارة راح تعيّن المصورين.");
   }
@@ -559,14 +558,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
       : `⚠️ لازم تأكيد وتعيين مصور من لوحة الإدارة`)
   );
 
-  if (session.photographers?.length > 0) {
-    await send("📌 المصورين معيّنين — الإدارة راح تأكد الحجز من النظام.");
-  } else {
-    await send("📌 حجزك *مبدئي*. الاستوديو راح يتواصل معاك قريباً ✅");
-  }
-
-  await clearChatState(chatId);
-  await send(MAIN_MENU_TEXT);
+  await send("هل تحتاج أي شيء ثاني؟ تقدر تسألني عن باقة أو موعد آخر في أي وقت 😊");
   await setChatState(chatId, STATES.MAIN_MENU, {});
 }
 
@@ -608,8 +600,7 @@ async function handleCancelConfirm(ctx, text, data, notifyOwner) {
   await notifyOwner(
     `⚠️ *إلغاء حجز*\n👤 ${data.session.clientName}\n📅 ${data.session.date} ${data.session.time}\nعبر واتساب`
   );
-  await clearChatState(chatId);
-  await send(MAIN_MENU_TEXT);
+  await send("تقدر تكتب لي أي شيء ثاني متى ما تبي 😊");
   await setChatState(chatId, STATES.MAIN_MENU, {});
 }
 
@@ -670,31 +661,26 @@ async function handleRescheduleTime(ctx, text, data, notifyOwner) {
     return;
   }
   await rescheduleSession(data.sessionId, data.newDate, slot.time);
-  await send(`✅ تم تحديث الموعد إلى ${data.newDate} الساعة ${slot.time}`);
+  await send(`✅ تم تحديث الموعد إلى ${data.newDate} الساعة ${slot.time}\nتقدر تسألني أي شيء ثاني متى ما تبي 😊`);
   await notifyOwner(
     `🔄 *تغيير موعد*\n👤 ${data.session.clientName}\n📅 ${data.newDate} ${slot.time}`
   );
-  await clearChatState(chatId);
-  await send(MAIN_MENU_TEXT);
   await setChatState(chatId, STATES.MAIN_MENU, {});
 }
 
 async function startPayFlow(ctx) {
   const { chatId, phone, send } = ctx;
+  // Keep unpaid ledger internal — clients only see soft payment booking list (price only)
   const invoices = (await getInvoicesByPhone(phone)).filter((i) => getAmountDue(i) > 0);
   if (!invoices.length) {
-    await send("لا توجد فواتير بمبالغ متبقية على رقمك.");
+    await send("ما عندناش حجز يحتاج دفع مرتبط برقمك حالياً. لو تبي تحجز جديد قول لي 😊");
     return;
   }
   const lines = invoices.slice(0, 8).map((inv, i) => {
-    const due = getAmountDue(inv);
     const total = Number(inv.totalPrice) || 0;
-    if (due > 0) {
-      return `*${i + 1}* — ${inv.sessionName} | السعر ${total} د.ل | المبلغ المستحق ${due} د.ل`;
-    }
-    return `*${i + 1}* — ${inv.sessionName} | السعر ${total} د.ل`;
+    return `*${i + 1}* — ${inv.sessionName || "جلسة"} | ${inv.date || ""} | السعر ${total} د.ل`;
   });
-  await send(`💰 *الدفع*\n${lines.join("\n")}`);
+  await send(`💰 *الدفع / العربون*\n${lines.join("\n")}\n\nابعث رقم الحجز اللي تبي تدفع عليه`);
   await setChatState(chatId, STATES.PAY_PICK_INVOICE, { invoices: invoices.slice(0, 8) });
 }
 
@@ -738,8 +724,7 @@ async function handlePayAwaitReceipt(ctx, text, data, notifyOwner) {
     await notifyOwner(
       `💵 *إثبات دفع واتساب*\nفاتورة #${data.invoiceId.slice(-6)}\nالعميل: ${data.invoice.clientName}\n${hasMedia ? "(مرفق صورة)" : text}`
     );
-    await clearChatState(chatId);
-    await send(MAIN_MENU_TEXT);
+    await send("تقدر تسألني عن أي شيء ثاني في أي وقت 😊");
     await setChatState(chatId, STATES.MAIN_MENU, {});
     return;
   }
