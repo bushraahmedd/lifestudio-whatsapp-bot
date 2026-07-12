@@ -27,8 +27,8 @@ async function getChatState(chatId) {
   return data;
 }
 
-async function setChatState(chatId, state, data = {}) {
-  const expiresAt = fb.Timestamp.fromDate(new Date(Date.now() + 30 * 60 * 1000));
+async function setChatState(chatId, state, data = {}, ttlMs = 30 * 60 * 1000) {
+  const expiresAt = fb.Timestamp.fromDate(new Date(Date.now() + ttlMs));
   await fb.db.collection("whatsapp_chats").doc(chatId).set({
     state,
     data,

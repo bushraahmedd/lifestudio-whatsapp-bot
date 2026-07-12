@@ -146,7 +146,9 @@ function formatSlotsList(days) {
     .slice(0, 6)
     .map((d, i) => {
       const times = d.slots.slice(0, 6).map((s) => s.time).join("، ");
-      return `*${i + 1}* — ${d.label} (${d.date})\n   ${times}`;
+      const dm = String(d.date || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+      const short = dm ? `${dm[3].padStart(2, "0")}/${dm[2].padStart(2, "0")}` : d.date;
+      return `*${i + 1}* — ${d.label} (${short})\n   ${times}`;
     })
     .join("\n\n");
 }

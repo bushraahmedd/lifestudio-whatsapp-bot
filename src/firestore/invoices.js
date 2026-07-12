@@ -189,12 +189,17 @@ async function markInvoicePaid(invoiceId, partialAmount) {
 function formatInvoiceMessage(inv) {
   const total = Number(inv.totalPrice) || 0;
   const paid = Number(inv.deposit) || 0;
+  const dateDisp = (() => {
+    const m = String(inv.date || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return `${m[3].padStart(2, "0")}/${m[2].padStart(2, "0")}`;
+    return inv.date || "—";
+  })();
   const lines = [
     "🧾 *تأكيد الحجز — لايف استوديو*",
     `رقم الحجز: #${(inv.id || "").slice(-6).toUpperCase()}`,
     `العميل: ${inv.clientName}`,
     `الجلسة: ${inv.sessionName || "—"}`,
-    `التاريخ: ${inv.date}`,
+    `التاريخ: ${dateDisp}`,
     `السعر: *${total.toLocaleString()} د.ل*`,
   ];
 

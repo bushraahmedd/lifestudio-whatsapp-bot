@@ -1,10 +1,10 @@
 const { STATES, MAIN_MENU_TEXT, normalizeInput, isBack } = require("./stateMachine");
 const { formatBankTransfer } = require("./messages");
-const { SOFT_HELP_TEXT } = require("./messages");
+const { SOFT_HELP_TEXT, HUMAN_HANDOFF_TEXT, BOT_RESUMED_TEXT } = require("./messages");
 const { detectIntent, isAffirmative } = require("./intent");
 const { matchSinglePackage } = require("./packageMatcher");
 const { buildSinglePackageReply, buildCategoryHint } = require("./packageReplies");
-const { parseDateTime } = require("./dateParser");
+const { parseDateTime, formatDisplayDate } = require("./dateParser");
 const {
   buildAmbiguousClarifier,
   CATEGORY_META,
@@ -46,6 +46,59 @@ function isYes(text) {
   return ["نعم", "أيوه", "ايوه", "ايه", "أيه", "yes", "ok", "تأكيد", "1"].includes(t);
 }
 
+function wantsHuman(text) {
+  const t = normalizeInput(text);
+  return (
+    t === "موظف"
+    || t === "بشري"
+    || t === "ايقاف"
+    || t === "إيقاف"
+    || t === "stop"
+    || t.includes("كلم موظف")
+    || t.includes("ايقاف البوت")
+    || t.includes("إيقاف البوت")
+    || t.includes("وقف البوت")
+    || t.includes("ابي موظف")
+    || t.includes("نبي موظف")
+  );
+}
+
+function wantsBotResume(text) {
+  const t = normalizeInput(text);
+  return (
+    t === "تشغيل"
+    || t === "بوت"
+    || t === "resume"
+    || t === "start"
+    || t.includes("تشغيل البوت")
+    || t.includes("رجع البوت")
+  );
+}
+
+const HUMAN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+async function startHumanTakeover(ctx, data = {}) {
+  const { chatId, phone, send, notifyOwner } = ctx;
+  await send(HUMAN_HANDOFF_TEXT);
+  await setChatState(chatId, STATES.HUMAN_TAKEOVER, { ...data, humanSince: new Date().toISOString() }, HUMAN_TTL_MS);
+  try {
+    await notifyOwner(
+      `👤 *طلب موظف — البوت متوقف*\n` +
+      `📱 ${phone}\n` +
+      `الدردشة: ${chatId}\n` +
+      `كمّل مع العميل من واتساب. لإعادة البوت اطلب منه يكتب: تشغيل`
+    );
+  } catch {
+    // ignore
+  }
+}
+
+async function resumeBot(ctx) {
+  const { chatId, send } = ctx;
+  await send(BOT_RESUMED_TEXT);
+  await setChatState(chatId, STATES.MAIN_MENU, {});
+}
+
 async function continueBookingAfterSlot(ctx, data) {
   const { chatId, send } = ctx;
   if (data.packageId || data.selectedPackageId) {
@@ -85,14 +138,14 @@ async function handleSlotRequest(ctx, date, time, data) {
   if (!ok) {
     const nearby = await getNearbyAvailability(date, 4);
     await send(
-      `نعتذر منك 🙏 هذا الموعد *${date}* الساعة *${time}* محجوز مسبقاً.\n\n` +
+      `نعتذر منك 🙏 هذا الموعد *${formatDisplayDate(date)}* الساعة *${time}* محجوز مسبقاً.\n\n` +
       `القائمة التالية تحتوي على الأوقات المتاحة في نفس اليوم أو الأيام القريبة — هل يناسبك أحدها؟\n\n` +
       `${formatSlotsList(nearby)}\n\nابعث رقم اليوم أو *0* للقائمة.`
     );
     await setChatState(chatId, STATES.BOOK_PICK_DATE, { ...data, days: nearby });
     return;
   }
-  await send(`تمام! الموعد *${date}* الساعة *${time}* متاح ✅ نكمل معاك الحجز.`);
+  await send(`تمام! الموعد *${formatDisplayDate(date)}* الساعة *${time}* متاح ✅ نكمل معاك الحجز.`);
   await continueBookingAfterSlot(ctx, { ...data, selectedDate: date, selectedTime: time });
 }
 
@@ -112,6 +165,23 @@ async function handleIncomingMessage(ctx) {
 
   await logWhatsAppEvent({ chatId, phone, direction: "in", message: text });
 
+  // Resume bot anytime
+  if (wantsBotResume(text)) {
+    return resumeBot(ctx);
+  }
+
+  let chat = await getChatState(chatId);
+
+  // Human takeover — bot stays silent (staff finishes with client)
+  if (chat?.state === STATES.HUMAN_TAKEOVER) {
+    return;
+  }
+
+  // Client/staff asks to stop bot and talk to human
+  if (wantsHuman(text)) {
+    return startHumanTakeover(ctx, chat?.data || {});
+  }
+
   if (isBack(text)) {
     await clearChatState(chatId);
     await send(MAIN_MENU_TEXT);
@@ -119,7 +189,6 @@ async function handleIncomingMessage(ctx) {
     return;
   }
 
-  let chat = await getChatState(chatId);
   if (!chat) {
     const botConfig = await getBotConfig();
     await send(`${botConfig.greeting}\n\n${MAIN_MENU_TEXT}`);
@@ -135,6 +204,8 @@ async function handleIncomingMessage(ctx) {
         return handleMainMenu(ctx, text, data);
       case STATES.INTENT_CLARIFY:
         return handleIntentClarify(ctx, text, data);
+      case STATES.HUMAN_TAKEOVER:
+        return;
       case STATES.BOOK_PICK_DATE:
         return handleBookPickDate(ctx, text, data);
       case STATES.BOOK_PICK_TIME:
@@ -194,13 +265,13 @@ async function handleMainMenu(ctx, text, data) {
     if (!day.slots.length) {
       const nearby = await getNearbyAvailability(parsed.date, 4);
       await send(
-        `نعتذر منك، يوم *${parsed.date}* محجوز بالكامل.\n\n${formatSlotsList(nearby)}\n\nابعث رقم اليوم المناسب.`
+        `نعتذر منك، يوم *${formatDisplayDate(parsed.date)}* محجوز بالكامل.\n\n${formatSlotsList(nearby)}\n\nابعث رقم اليوم المناسب.`
       );
       await setChatState(chatId, STATES.BOOK_PICK_DATE, { ...data, days: nearby });
       return;
     }
     const lines = day.slots.slice(0, 12).map((s, i) => `*${i + 1}* — ${s.time}`);
-    await send(`مواعيد *${day.label}* (${day.date}):\n${lines.join("\n")}\n\nابعث رقم الوقت`);
+    await send(`مواعيد *${day.label}* (${formatDisplayDate(day.date)}):\n${lines.join("\n")}\n\nابعث رقم الوقت`);
     await setChatState(chatId, STATES.BOOK_PICK_TIME, {
       ...data,
       selectedDate: day.date,
@@ -323,7 +394,7 @@ async function startBookFlow(ctx, opts = {}) {
   const intro = catLabel
     ? `📅 *حجز ${catLabel}* — اختار اليوم أو ابعت التاريخ والوقت مباشرة:`
     : "📅 *المواعيد الفاضية* — اختار اليوم أو ابعت التاريخ:";
-  const lines = days.slice(0, 10).map((d, i) => `*${i + 1}* — ${d.label} (${d.date}) — ${d.slots.length} موعد`);
+  const lines = days.slice(0, 10).map((d, i) => `*${i + 1}* — ${d.label} (${formatDisplayDate(d.date)}) — ${d.slots.length} موعد`);
   await send(`${intro}\n${lines.join("\n")}\n\nابعث رقم اليوم، أو *0* للرجوع`);
   await setChatState(chatId, STATES.BOOK_PICK_DATE, {
     days: days.slice(0, 10),
@@ -348,7 +419,7 @@ async function handleBookPickDate(ctx, text, data) {
       if (!day.slots.length) {
         const nearby = await getNearbyAvailability(parsed.date, 4);
         await send(
-          `نعتذر منك، يوم *${parsed.date}* محجوز.\n\n${formatSlotsList(nearby)}\n\nاختار يوماً من القائمة.`
+          `نعتذر منك، يوم *${formatDisplayDate(parsed.date)}* محجوز.\n\n${formatSlotsList(nearby)}\n\nاختار يوماً من القائمة.`
         );
         await setChatState(chatId, STATES.BOOK_PICK_DATE, { ...data, days: nearby });
         return;
@@ -461,7 +532,7 @@ async function handleBookPayChannel(ctx, text, data) {
   const summary = [
     "✅ *ملخص الحجز*",
     `الاسم: ${data.clientName}`,
-    `التاريخ: ${data.selectedDate}`,
+    `التاريخ: ${formatDisplayDate(data.selectedDate)}`,
     `الوقت: ${data.selectedTime}`,
     `المكان: ${data.location}`,
     `الباقة: ${data.packageLabel} — ${data.totalPrice} د.ل`,
@@ -548,7 +619,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
   await notifyOwner(
     `🔔 *حجز جديد — واتساب*\n` +
     `👤 العميل: ${data.clientName}\n📱 ${phone}\n` +
-    `📅 ${data.selectedDate} — ${data.selectedTime}\n` +
+    `📅 ${formatDisplayDate(data.selectedDate)} — ${data.selectedTime}\n` +
     `📍 ${data.location}\n` +
     `📦 ${data.packageLabel} (${data.totalPrice} د.ل)\n` +
     `💳 ${payInfo} — ${data.paymentMethod || "كاش"}\n` +

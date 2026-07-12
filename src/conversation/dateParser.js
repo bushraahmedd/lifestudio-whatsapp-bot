@@ -15,6 +15,25 @@ function pad(n) {
   return String(n).padStart(2, "0");
 }
 
+/** YYYY-MM-DD → DD/MM (clients never need the year) */
+function formatDisplayDate(dateStr) {
+  if (!dateStr) return "—";
+  const m = String(dateStr).match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${pad(m[3])}/${pad(m[2])}`;
+  const m2 = String(dateStr).match(/(\d{1,2})[\/\-.](\d{1,2})/);
+  if (m2) return `${pad(m2[1])}/${pad(m2[2])}`;
+  return String(dateStr);
+}
+
+function resolveYear(month, day) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let y = today.getFullYear();
+  const cand = new Date(y, month - 1, day);
+  if (cand < today) y += 1;
+  return y;
+}
+
 function parseTime(text) {
   const t = (text || "").trim().toLowerCase();
   let m = t.match(/(\d{1,2})[:.](\d{2})/);
@@ -29,10 +48,13 @@ function parseTime(text) {
     return `${pad(h)}:00`;
   }
 
-  m = t.match(/\b(\d{1,2})\b/);
-  if (m) {
-    const h = parseInt(m[1], 10);
-    if (h >= 0 && h <= 23) return `${pad(h)}:00`;
+  // Alone hour only if message looks like a time (with ساعة / الوقت)
+  if (/ساعة|الوقت|موعد/.test(t)) {
+    m = t.match(/\b(\d{1,2})\b/);
+    if (m) {
+      const h = parseInt(m[1], 10);
+      if (h >= 0 && h <= 23) return `${pad(h)}:00`;
+    }
   }
   return null;
 }
@@ -50,18 +72,35 @@ function parseDate(text) {
     return toDateKey(d);
   }
 
+  // Full ISO
   let m = raw.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
 
+  // DD/MM/YYYY or DD-MM-YYYY
   m = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
   if (m) {
     const a = parseInt(m[1], 10);
     const b = parseInt(m[2], 10);
     let y = parseInt(m[3], 10);
     if (y < 100) y += 2000;
-    const day = a > 12 ? a : b;
-    const month = a > 12 ? b : a;
-    return `${y}-${pad(month)}-${pad(day)}`;
+    // Prefer day/month (Libya): first number is day if ≤31
+    const day = a;
+    const month = b;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${y}-${pad(month)}-${pad(day)}`;
+    }
+  }
+
+  // DD/MM or DD-MM — year NOT required
+  m = raw.match(/(?:^|[^\d])(\d{1,2})[\/\-.](\d{1,2})(?:[^\d]|$)/);
+  if (!m) m = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m) {
+    const day = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const y = resolveYear(month, day);
+      return `${y}-${pad(month)}-${pad(day)}`;
+    }
   }
 
   for (const [name, wd] of Object.entries(WEEKDAYS)) {
@@ -77,10 +116,8 @@ function parseDate(text) {
     if (t.includes(name)) {
       const dm = t.match(/(\d{1,2})/);
       if (dm) {
-        let y = today.getFullYear();
         const day = parseInt(dm[1], 10);
-        const cand = new Date(y, month - 1, day);
-        if (cand < today) y += 1;
+        const y = resolveYear(month, day);
         return `${y}-${pad(month)}-${pad(day)}`;
       }
     }
@@ -93,9 +130,7 @@ function parseDate(text) {
  * @returns {{ date: string|null, time: string|null }}
  */
 function parseDateTime(text) {
-  const time = parseTime(text);
-  const date = parseDate(text);
-  return { date, time };
+  return { date: parseDate(text), time: parseTime(text) };
 }
 
-module.exports = { parseDate, parseTime, parseDateTime };
+module.exports = { parseDate, parseTime, parseDateTime, formatDisplayDate };

@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
-const pdfmake = require("pdfmake");
-const { ar } = require("./arabicText");
+const PDFDocument = require("pdfkit");
+const { ar, arLine } = require("./arabicText");
 
 const BRAND = {
   nameAr: "لايف استوديو",
@@ -11,10 +11,16 @@ const BRAND = {
   footer: "البيضاء - بجانب شيل بوحليمه عماره مغسله الرونق | هاتف: 0926128650 | شكراً لثقتكم في لايف استوديو",
 };
 
-const FONT_CANDIDATES = [
+const FONT_REG = [
   process.env.INVOICE_FONT_PATH,
+  path.join(__dirname, "../assets/fonts/Amiri-Regular.ttf"),
+  path.join(__dirname, "../../assets/fonts/Amiri-Regular.ttf"),
   path.join(__dirname, "../assets/fonts/NotoSansArabic-Regular.ttf"),
-  path.join(__dirname, "../../assets/fonts/NotoSansArabic-Regular.ttf"),
+].filter(Boolean);
+
+const FONT_BOLD = [
+  path.join(__dirname, "../assets/fonts/Amiri-Bold.ttf"),
+  path.join(__dirname, "../../assets/fonts/Amiri-Bold.ttf"),
 ].filter(Boolean);
 
 const LOGO_CANDIDATES = [
@@ -22,216 +28,204 @@ const LOGO_CANDIDATES = [
   path.join(__dirname, "../../assets/logo-120.png"),
 ].filter(Boolean);
 
-let fontsReady = false;
-
-function ensureFonts() {
-  if (fontsReady) return;
-  const fontPath = FONT_CANDIDATES.find((p) => fs.existsSync(p));
-  if (!fontPath) {
-    throw new Error("Arabic font missing — add NotoSansArabic-Regular.ttf to src/assets/fonts/");
-  }
-  pdfmake.setFonts({
-    Arabic: { normal: fontPath, bold: fontPath, italics: fontPath, bolditalics: fontPath },
-  });
-  pdfmake.setLocalAccessPolicy(() => true);
-  fontsReady = true;
+function resolveFont(candidates) {
+  return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
-function logoImage() {
-  const p = LOGO_CANDIDATES.find((x) => fs.existsSync(x));
-  return p ? p : null;
+/** Format YYYY-MM-DD → DD/MM (no year for client display) */
+function formatDisplayDate(dateStr) {
+  if (!dateStr) return "—";
+  const m = String(dateStr).match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[3].padStart(2, "0")}/${m[2].padStart(2, "0")}`;
+  const m2 = String(dateStr).match(/(\d{1,2})[\/\-.](\d{1,2})/);
+  if (m2) return `${m2[1].padStart(2, "0")}/${m2[2].padStart(2, "0")}`;
+  return String(dateStr);
 }
 
-function t(text) {
-  return ar(text == null ? "" : String(text));
+function money(n) {
+  return `${Number(n || 0).toLocaleString("en-US")} د.ل`;
 }
 
 /**
+ * Official Live Studio invoice PDF — Amiri font + Arabic reshape (no □□□).
  * @returns {Promise<Buffer>}
  */
-async function generateInvoicePdf(invoice, session = {}) {
-  ensureFonts();
+function generateInvoicePdf(invoice, session = {}) {
+  return new Promise((resolve, reject) => {
+    const fontReg = resolveFont(FONT_REG);
+    const fontBold = resolveFont(FONT_BOLD) || fontReg;
+    if (!fontReg) {
+      reject(new Error("Arabic font missing (Amiri-Regular.ttf)"));
+      return;
+    }
 
-  const total = Number(invoice.totalPrice) || 0;
-  const paid = Number(invoice.deposit) || 0;
-  // Client PDF: never show unpaid / remaining balance
-  const fullyPaid = paid > 0 && paid >= total;
-  const invNo = `#INV-${(invoice.id || "").slice(-8).toUpperCase() || "--------"}`;
-  const logo = logoImage();
+    const doc = new PDFDocument({ size: "A4", margin: 40, autoFirstPage: true });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
 
-  const headerBlock = {
-    columns: [
-      {
-        width: logo ? 90 : 0,
-        stack: logo ? [{ image: logo, width: 90 }] : [],
-        alignment: "left",
-      },
-      {
-        width: "*",
-        stack: [
-          { text: t(BRAND.nameAr), fontSize: 26, color: BRAND.color, alignment: "right", bold: true },
-          { text: BRAND.nameEn, fontSize: 11, color: "#666666", alignment: "right" },
-          { text: t(BRAND.city), fontSize: 11, color: "#333333", alignment: "right", margin: [0, 4, 0, 0] },
-        ],
-      },
-    ],
-    margin: [0, 0, 0, 16],
-  };
+    doc.registerFont("Ar", fontReg);
+    doc.registerFont("ArBold", fontBold);
 
-  const clientGrid = {
-    columns: [
-      {
-        width: "*",
-        stack: [
-          { text: `${t("العميل")}: ${t(invoice.clientName || "—")}`, fontSize: 11, margin: [0, 2, 0, 2] },
-          { text: `${t("اسم الجلسة")}: ${t(invoice.sessionName || "تصوير احترافي")}`, fontSize: 11, margin: [0, 2, 0, 2] },
-          { text: `${t("موقع التصوير")}: ${t(invoice.location || session.location || "—")}`, fontSize: 11, margin: [0, 2, 0, 2] },
-        ],
-      },
-      {
-        width: "*",
-        stack: [
-          { text: `${t("تاريخ الحجز")}: ${invoice.date || session.date || "—"}`, fontSize: 11, alignment: "left", margin: [0, 2, 0, 2] },
-          { text: `${t("رقم الفاتورة")}: ${invNo}`, fontSize: 11, alignment: "left", margin: [0, 2, 0, 2] },
-          ...(session.time
-            ? [{ text: `${t("الوقت")}: ${session.time}`, fontSize: 11, alignment: "left", margin: [0, 2, 0, 2] }]
-            : []),
-        ],
-      },
-    ],
-    margin: [0, 0, 0, 20],
-  };
+    const total = Number(invoice.totalPrice) || 0;
+    const paid = Number(invoice.deposit) || 0;
+    const fullyPaid = paid > 0 && paid >= total;
+    const invNo = `#INV-${(invoice.id || "").slice(-8).toUpperCase() || "--------"}`;
+    const pageW = doc.page.width;
+    const margin = 40;
+    const contentW = pageW - margin * 2;
 
-  const detailsCell = [
-    { text: t(invoice.package || invoice.sessionName || "الباقة المختارة"), fontSize: 14, color: BRAND.color, bold: true, margin: [0, 0, 0, 8] },
-  ];
-  if (invoice.sessionContent) {
-    detailsCell.push(
-      { text: t("محتويات الجلسة:"), fontSize: 10, color: "#555555", bold: true },
-      { text: t(invoice.sessionContent), fontSize: 10, color: "#777777", margin: [0, 4, 16, 8] }
-    );
-  }
-  if (invoice.equipment) {
-    detailsCell.push(
-      { text: t("المعدات المستخدمة:"), fontSize: 10, color: "#555555", bold: true },
-      { text: t(invoice.equipment), fontSize: 10, color: "#777777", margin: [0, 4, 16, 0] }
-    );
-  }
+    // Double green border like admin template
+    doc.lineWidth(2).strokeColor(BRAND.color)
+      .rect(margin - 4, margin - 4, contentW + 8, doc.page.height - margin * 2 + 8).stroke();
+    doc.lineWidth(1)
+      .rect(margin, margin, contentW, doc.page.height - margin * 2).stroke();
 
-  const table = {
-    table: {
-      widths: ["*", 100],
-      body: [
-        [
-          { text: t("تفاصيل الجلسة والمعدات"), fillColor: "#f4f4f4", bold: true, alignment: "right" },
-          { text: t("القيمة"), fillColor: "#f4f4f4", bold: true, alignment: "left" },
-        ],
-        [
-          { stack: detailsCell, margin: [8, 10, 8, 10] },
-          { text: `${total.toLocaleString()} ${t("د.ل")}`, bold: true, fontSize: 14, alignment: "left", margin: [8, 10, 8, 10] },
-        ],
-      ],
-    },
-    layout: {
-      hLineWidth: (i) => (i === 1 ? 1 : 0),
-      vLineWidth: () => 0,
-      hLineColor: () => "#eeeeee",
-      paddingLeft: () => 0,
-      paddingRight: () => 0,
-    },
-    margin: [0, 0, 0, 24],
-  };
+    let y = margin + 20;
+    const rightX = margin + 20;
+    const textW = contentW - 40;
 
-  const paymentSummary = {
-    width: 260,
-    alignment: "right",
-    stack: [
-      {
-        columns: [
-          { text: `${total.toLocaleString()} ${t("د.ل")}`, alignment: "left", width: "*" },
-          { text: t("السعر:"), color: "#666666", width: "auto" },
-        ],
-        margin: [0, 4, 0, 4],
-      },
-      ...(paid > 0 && paid < total
-        ? [{
-            columns: [
-              { text: `${paid.toLocaleString()} ${t("د.ل")}`, alignment: "left", width: "*", bold: true, color: "#27ae60" },
-              { text: t("العربون المسجّل:"), bold: true, color: "#27ae60", width: "auto" },
-            ],
-            margin: [0, 4, 0, 4],
-          }]
-        : []),
-      fullyPaid
-        ? {
-            text: t("تم الدفع بالكامل"),
-            alignment: "center",
-            bold: true,
-            fontSize: 14,
-            color: "#ffffff",
-            fillColor: "#27ae60",
-            margin: [0, 8, 0, 0],
-          }
-        : {
-            text: t("تم تسجيل الحجز — شكراً لثقتكم"),
-            alignment: "center",
-            bold: true,
-            fontSize: 12,
-            color: "#ffffff",
-            fillColor: BRAND.color,
-            margin: [0, 8, 0, 0],
-          },
-    ],
-  };
+    // Header: logo left, brand right
+    const logoPath = LOGO_CANDIDATES.find((p) => fs.existsSync(p));
+    if (logoPath) {
+      try {
+        doc.image(logoPath, margin + 16, y, { width: 80 });
+      } catch {
+        // ignore logo errors
+      }
+    }
 
-  const docDefinition = {
-    pageSize: "A4",
-    pageMargins: [40, 40, 40, 50],
-    defaultStyle: { font: "Arabic", fontSize: 11, alignment: "right" },
-    content: [
-      {
-        canvas: [
-          { type: "rect", x: 0, y: 0, w: 515, h: 762, lineWidth: 2, lineColor: BRAND.color },
-          { type: "rect", x: 4, y: 4, w: 507, h: 754, lineWidth: 1, lineColor: BRAND.color },
-        ],
-        absolutePosition: { x: 40, y: 40 },
-      },
-      { margin: [16, 16, 16, 0], stack: [
-        headerBlock,
-        { canvas: [{ type: "line", x1: 0, y1: 0, x2: 483, y2: 0, lineWidth: 2, lineColor: BRAND.color }], margin: [0, 0, 0, 16] },
-        clientGrid,
-        table,
-        paymentSummary,
-        ...(invoice.notes
-          ? [{
-              margin: [0, 20, 0, 0],
-              table: {
-                widths: ["*"],
-                body: [[{
-                  stack: [
-                    { text: t("ملاحظات:"), color: BRAND.color, bold: true, fontSize: 11 },
-                    { text: t(invoice.notes), color: "#555555", fontSize: 10, margin: [0, 6, 0, 0] },
-                  ],
-                  fillColor: "#f8fafc",
-                  margin: [10, 10, 10, 10],
-                }]],
-              },
-              layout: { hLineWidth: () => 0, vLineWidth: () => 0 },
-            }]
-          : []),
-        {
-          columns: [
-            { width: "*", stack: [{ text: t("توقيع المستلم"), alignment: "center", margin: [0, 50, 0, 4] }, { canvas: [{ type: "line", x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1, lineColor: "#cccccc" }] }] },
-            { width: "*", stack: [{ text: t("ختم وتوقيع الإدارة"), alignment: "center", margin: [0, 50, 0, 4] }, { canvas: [{ type: "line", x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1, lineColor: "#cccccc" }] }] },
-          ],
-          margin: [0, 30, 0, 0],
-        },
-      ]},
-      { text: t(BRAND.footer), fontSize: 8, color: "#aaaaaa", alignment: "center", margin: [16, 0, 16, 16], absolutePosition: { x: 56, y: 780 } },
-    ],
-  };
+    doc.font("ArBold").fontSize(26).fillColor(BRAND.color)
+      .text(ar(BRAND.nameAr), rightX, y, { width: textW, align: "right" });
+    doc.font("Ar").fontSize(11).fillColor("#666666")
+      .text(BRAND.nameEn, rightX, y + 32, { width: textW, align: "right" });
+    doc.fontSize(11).fillColor("#333333")
+      .text(ar(BRAND.city), rightX, y + 48, { width: textW, align: "right" });
 
-  return pdfmake.createPdf(docDefinition).getBuffer();
+    y += 90;
+    doc.moveTo(margin + 16, y).lineTo(pageW - margin - 16, y)
+      .strokeColor(BRAND.color).lineWidth(2).stroke();
+    y += 20;
+
+    // Client grid
+    const colW = (textW - 20) / 2;
+    const leftColX = margin + 20;
+    const rightColX = margin + 20 + colW + 20;
+    const displayDate = formatDisplayDate(invoice.date || session.date);
+
+    doc.font("Ar").fontSize(11).fillColor("#222222");
+    doc.text(arLine("العميل:", invoice.clientName || "—"), rightColX, y, { width: colW, align: "right" });
+    doc.text(arLine("اسم الجلسة:", invoice.sessionName || "تصوير احترافي"), rightColX, y + 20, { width: colW, align: "right" });
+    doc.text(arLine("موقع التصوير:", invoice.location || session.location || "—"), rightColX, y + 40, { width: colW, align: "right" });
+
+    doc.text(arLine("تاريخ الحجز:", displayDate), leftColX, y, { width: colW, align: "right" });
+    doc.text(arLine("رقم الفاتورة:", invNo), leftColX, y + 20, { width: colW, align: "right" });
+    if (session.time) {
+      doc.text(arLine("الوقت:", session.time), leftColX, y + 40, { width: colW, align: "right" });
+    }
+
+    y += 80;
+
+    // Table header
+    const tableX = margin + 16;
+    const tableW = contentW - 32;
+    const valueColW = 110;
+    const detailColW = tableW - valueColW;
+
+    doc.rect(tableX, y, tableW, 28).fill("#f4f4f4");
+    doc.moveTo(tableX, y + 28).lineTo(tableX + tableW, y + 28)
+      .strokeColor(BRAND.color).lineWidth(2).stroke();
+    doc.font("ArBold").fontSize(11).fillColor("#222");
+    doc.text(ar("تفاصيل الجلسة والمعدات"), tableX + 8, y + 7, { width: detailColW - 16, align: "right" });
+    doc.text(ar("القيمة"), tableX + detailColW, y + 7, { width: valueColW - 8, align: "left" });
+    y += 36;
+
+    // Package row
+    const pkgLabel = invoice.package || invoice.sessionName || "الباقة المختارة";
+    doc.font("ArBold").fontSize(13).fillColor(BRAND.color)
+      .text(ar(pkgLabel), tableX + 8, y, { width: detailColW - 16, align: "right" });
+    doc.font("ArBold").fontSize(14).fillColor("#111")
+      .text(ar(money(total)), tableX + detailColW, y, { width: valueColW - 8, align: "left" });
+    y += 24;
+
+    if (invoice.sessionContent) {
+      doc.font("ArBold").fontSize(10).fillColor("#555")
+        .text(ar("محتويات الجلسة:"), tableX + 8, y, { width: detailColW - 16, align: "right" });
+      y += 16;
+      doc.font("Ar").fontSize(10).fillColor("#777")
+        .text(ar(invoice.sessionContent), tableX + 8, y, { width: detailColW - 16, align: "right" });
+      y += 20;
+    }
+    if (invoice.equipment) {
+      doc.font("ArBold").fontSize(10).fillColor("#555")
+        .text(ar("المعدات المستخدمة:"), tableX + 8, y, { width: detailColW - 16, align: "right" });
+      y += 16;
+      doc.font("Ar").fontSize(10).fillColor("#777")
+        .text(ar(invoice.equipment), tableX + 8, y, { width: detailColW - 16, align: "right" });
+      y += 20;
+    }
+
+    y += 10;
+    doc.moveTo(tableX, y).lineTo(tableX + tableW, y).strokeColor("#eeeeee").lineWidth(1).stroke();
+    y += 24;
+
+    // Payment summary (right side) — no unpaid remaining for clients
+    const boxW = 240;
+    const boxX = pageW - margin - 20 - boxW;
+    doc.font("Ar").fontSize(11).fillColor("#666");
+    doc.text(ar("السعر:"), boxX, y, { width: boxW / 2, align: "right" });
+    doc.fillColor("#111").text(ar(money(total)), boxX + boxW / 2, y, { width: boxW / 2, align: "left" });
+    y += 22;
+
+    if (paid > 0 && paid < total) {
+      doc.fillColor("#27ae60").font("ArBold");
+      doc.text(ar("العربون المسجّل:"), boxX, y, { width: boxW / 2, align: "right" });
+      doc.text(ar(money(paid)), boxX + boxW / 2, y, { width: boxW / 2, align: "left" });
+      y += 22;
+    }
+
+    y += 8;
+    if (fullyPaid) {
+      doc.roundedRect(boxX, y, boxW, 36, 8).fill("#27ae60");
+      doc.font("ArBold").fontSize(13).fillColor("#ffffff")
+        .text(ar("تم الدفع بالكامل"), boxX, y + 10, { width: boxW, align: "center" });
+    } else {
+      doc.roundedRect(boxX, y, boxW, 36, 8).fill(BRAND.color);
+      doc.font("ArBold").fontSize(12).fillColor("#ffffff")
+        .text(ar("تم تسجيل الحجز — شكراً لثقتكم"), boxX, y + 10, { width: boxW, align: "center" });
+    }
+    y += 50;
+
+    if (invoice.notes) {
+      doc.roundedRect(margin + 16, y, contentW - 32, 50, 8).fill("#f8fafc");
+      doc.font("ArBold").fontSize(11).fillColor(BRAND.color)
+        .text(ar("ملاحظات:"), margin + 26, y + 8, { width: contentW - 52, align: "right" });
+      doc.font("Ar").fontSize(10).fillColor("#555")
+        .text(ar(invoice.notes), margin + 26, y + 26, { width: contentW - 52, align: "right" });
+      y += 66;
+    }
+
+    // Signatures
+    y = Math.max(y + 30, doc.page.height - 140);
+    const sigW = 140;
+    const sig1X = margin + 50;
+    const sig2X = pageW - margin - 50 - sigW;
+    doc.font("Ar").fontSize(11).fillColor("#333")
+      .text(ar("توقيع المستلم"), sig1X, y, { width: sigW, align: "center" });
+    doc.text(ar("ختم وتوقيع الإدارة"), sig2X, y, { width: sigW, align: "center" });
+    doc.moveTo(sig1X, y + 45).lineTo(sig1X + sigW, y + 45).strokeColor("#cccccc").stroke();
+    doc.moveTo(sig2X, y + 45).lineTo(sig2X + sigW, y + 45).strokeColor("#cccccc").stroke();
+
+    // Footer
+    doc.font("Ar").fontSize(8).fillColor("#aaaaaa")
+      .text(ar(BRAND.footer), margin + 16, doc.page.height - margin - 18, {
+        width: contentW - 32,
+        align: "center",
+      });
+
+    doc.end();
+  });
 }
 
-module.exports = { generateInvoicePdf };
+module.exports = { generateInvoicePdf, formatDisplayDate };
