@@ -11,6 +11,7 @@ try {
 const qrcode = require("qrcode");
 const config = require("../config");
 const { updateBotStatus, logWhatsAppEvent, getBotConfig } = require("../firestore/botState");
+const { isValidClientPhone, normalizeClientPhoneInput } = require("./phoneUtils");
 
 /**
  * @param {function} onIncomingMessage
@@ -119,7 +120,17 @@ function createWebJsProvider(onIncomingMessage) {
       try {
         if (msg.fromMe || msg.isStatus) return;
         const chatId = msg.from;
-        const phone = chatId.replace("@c.us", "").replace("@lid", "");
+        let phone = "";
+        try {
+          const contact = await msg.getContact();
+          phone = normalizeClientPhoneInput(contact?.number || contact?.id?.user || "");
+        } catch {
+          // ignore
+        }
+        if (!isValidClientPhone(phone)) {
+          const fromId = chatId.replace("@c.us", "").replace("@lid", "");
+          phone = isValidClientPhone(fromId) ? normalizeClientPhoneInput(fromId) : "";
+        }
         const body = msg.body || "";
         const hasMedia = msg.hasMedia;
         await onIncomingMessage({

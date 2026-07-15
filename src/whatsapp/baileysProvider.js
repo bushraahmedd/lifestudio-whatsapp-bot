@@ -9,6 +9,10 @@ const qrcode = require("qrcode");
 const pino = require("pino");
 const config = require("../config");
 const { updateBotStatus, logWhatsAppEvent, getBotConfig } = require("../firestore/botState");
+const {
+  resolvePhoneFromBaileysMessage,
+  cacheLidPhoneMapping,
+} = require("./phoneUtils");
 
 function extractMessageText(msg) {
   const m = msg.message;
@@ -36,6 +40,8 @@ function createBaileysProvider(onIncomingMessage) {
   let sock = null;
   let connectionState = { connected: false, qrCode: null, phoneNumber: null, provider: "baileys" };
   let starting = false;
+  /** @type {Map<string,string>} lid JID -> phone digits */
+  const lidPhoneCache = new Map();
 
   function phoneToChatId(phone) {
     const digits = phone.replace(/\D/g, "");
@@ -159,6 +165,10 @@ function createBaileysProvider(onIncomingMessage) {
 
     sock.ev.on("creds.update", saveCreds);
 
+    sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => {
+      cacheLidPhoneMapping(lidPhoneCache, lid, jid);
+    });
+
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
@@ -219,9 +229,13 @@ function createBaileysProvider(onIncomingMessage) {
           if (!msg.key.remoteJid || msg.key.remoteJid === "status@broadcast") continue;
 
           const chatId = msg.key.remoteJid;
-          const phone = chatId.split("@")[0];
+          const phone = resolvePhoneFromBaileysMessage(msg, lidPhoneCache);
           const body = extractMessageText(msg);
           const hasMedia = hasMediaMessage(msg);
+
+          if (!phone && msg.key.senderPn) {
+            cacheLidPhoneMapping(lidPhoneCache, chatId, msg.key.senderPn);
+          }
 
           await onIncomingMessage({
             chatId,

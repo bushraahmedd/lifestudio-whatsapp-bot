@@ -18,7 +18,7 @@ function startWorkflowNotifier(sendText, phoneToChatId) {
       prevStages.set(id, after.workflowStage);
 
       if (change.type === "added") return;
-      if (!after.clientPhone) return;
+      if (!after.clientPhone && !after.whatsappChatId) return;
       if (prev === after.workflowStage) return;
       if (!after.workflowStage) return;
 
@@ -34,7 +34,7 @@ function startWorkflowNotifier(sendText, phoneToChatId) {
       if (after.workflowStage === "ready" && after.downloadUrl) {
         text += `\n\n🔗 رابط التحميل:\n${after.downloadUrl}`;
       }
-      await sendText(phoneToChatId(after.clientPhone), text);
+      await sendText(after.whatsappChatId || phoneToChatId(after.clientPhone), text);
     });
   });
 }

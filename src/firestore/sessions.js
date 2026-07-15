@@ -11,6 +11,7 @@ const ACTIVE_STATUSES = ["tentative", "in_progress", "completed"];
 async function createTentativeSession({
   clientName,
   clientPhone,
+  whatsappChatId,
   date,
   time,
   location,
@@ -24,6 +25,7 @@ async function createTentativeSession({
   const doc = {
     clientName,
     clientPhone: clientPhone || "",
+    whatsappChatId: whatsappChatId || "",
     date,
     time,
     location: location || "غير محدد",
@@ -75,14 +77,16 @@ async function assignPhotographersAndConfirm(sessionId, photographerIds) {
   return { id: sessionId, ...snap.data() };
 }
 
-async function getSessionsByPhone(phone) {
-  const digits = phone.replace(/\D/g, "");
+async function getSessionsByPhone(phone, whatsappChatId) {
+  const digits = (phone || "").replace(/\D/g, "");
   const snap = await fb.db.collection("sessions").get();
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .filter((s) => {
+      if (whatsappChatId && s.whatsappChatId === whatsappChatId) return true;
       const p = (s.clientPhone || "").replace(/\D/g, "");
-      return p && (p === digits || p.endsWith(digits.slice(-9)) || digits.endsWith(p.slice(-9)));
+      if (!p || !digits) return false;
+      return p === digits || p.endsWith(digits.slice(-9)) || digits.endsWith(p.slice(-9));
     })
     .filter((s) => ACTIVE_STATUSES.includes(s.status) || s.status === "cancelled")
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));

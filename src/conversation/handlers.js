@@ -40,6 +40,10 @@ const {
 } = require("../firestore/botState");
 const config = require("../config");
 const { sendInvoicePdfToClient } = require("../invoices/sendInvoicePdf");
+const {
+  isValidClientPhone,
+  normalizeClientPhoneInput,
+} = require("../whatsapp/phoneUtils");
 
 function isYes(text) {
   const t = normalizeInput(text);
@@ -76,6 +80,26 @@ function wantsBotResume(text) {
 }
 
 const HUMAN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+/** Best phone for this chat: saved in state, or resolved from WhatsApp ctx */
+function resolveClientPhone(ctx, data = {}) {
+  if (data.clientPhone && isValidClientPhone(data.clientPhone)) {
+    return normalizeClientPhoneInput(data.clientPhone);
+  }
+  if (ctx.phone && isValidClientPhone(ctx.phone)) {
+    return normalizeClientPhoneInput(ctx.phone);
+  }
+  return "";
+}
+
+async function askClientPhone(ctx, data) {
+  const { chatId, send } = ctx;
+  await send(
+    "📱 *رقم هاتفك للتواصل؟*\n" +
+    "ابعت رقمك (مثلاً *0926128650* أو *218926128650*)"
+  );
+  await setChatState(chatId, STATES.BOOK_CLIENT_PHONE, data);
+}
 
 async function startHumanTakeover(ctx, data = {}) {
   const { chatId, phone, send, notifyOwner } = ctx;
@@ -196,7 +220,11 @@ async function handleIncomingMessage(ctx) {
     chat = { state: STATES.MAIN_MENU, data: {} };
   }
 
-  const { state, data } = chat;
+  const { state, data: rawData } = chat;
+  let data = rawData || {};
+  if (isValidClientPhone(phone)) {
+    data = { ...data, clientPhone: normalizeClientPhoneInput(phone) };
+  }
 
   try {
     switch (state) {
@@ -214,6 +242,8 @@ async function handleIncomingMessage(ctx) {
         return handleBookPickPackage(ctx, text, data);
       case STATES.BOOK_CLIENT_NAME:
         return handleBookClientName(ctx, text, data);
+      case STATES.BOOK_CLIENT_PHONE:
+        return handleBookClientPhone(ctx, text, data);
       case STATES.BOOK_LOCATION:
         return handleBookLocation(ctx, text, data);
       case STATES.BOOK_PAYMENT_TYPE:
@@ -478,8 +508,24 @@ async function handleBookClientName(ctx, text, data) {
     await send("اكتب اسم صحيح لو سمحت.");
     return;
   }
+  const next = { ...data, clientName: text };
+  if (!resolveClientPhone(ctx, next)) {
+    return askClientPhone(ctx, next);
+  }
   await send("📍 وين *مكان الجلسة*؟ (القاعة / المدينة / العنوان)");
-  await setChatState(chatId, STATES.BOOK_LOCATION, { ...data, clientName: text });
+  await setChatState(chatId, STATES.BOOK_LOCATION, next);
+}
+
+async function handleBookClientPhone(ctx, text, data) {
+  const { chatId, send } = ctx;
+  const normalized = normalizeClientPhoneInput(text);
+  if (!isValidClientPhone(normalized)) {
+    await send("رقم غير صحيح. ابعت رقم هاتفك (مثلاً *0926128650*).");
+    return;
+  }
+  const next = { ...data, clientPhone: normalized };
+  await send("📍 وين *مكان الجلسة*؟ (القاعة / المدينة / العنوان)");
+  await setChatState(chatId, STATES.BOOK_LOCATION, next);
 }
 
 async function handleBookLocation(ctx, text, data) {
@@ -556,16 +602,23 @@ async function handleBookPayChannel(ctx, text, data) {
 }
 
 async function handleBookConfirm(ctx, text, data, notifyOwner) {
-  const { chatId, phone, send } = ctx;
+  const { chatId, send } = ctx;
   if (!isYes(text)) {
     await send("تم الإلغاء. ابعث *0* للقائمة.");
     await clearChatState(chatId);
     return;
   }
 
+  const clientPhone = resolveClientPhone(ctx, data);
+  if (!clientPhone) {
+    await send("📱 قبل التأكيد نحتاج رقم هاتفك للتواصل.");
+    return askClientPhone(ctx, data);
+  }
+
   const session = await createTentativeSession({
     clientName: data.clientName,
-    clientPhone: phone,
+    clientPhone,
+    whatsappChatId: chatId,
     date: data.selectedDate,
     time: data.selectedTime,
     location: data.location,
@@ -577,7 +630,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
   const invoice = await createInvoiceFromBooking({
     sessionId: session.id,
     clientName: data.clientName,
-    clientPhone: phone,
+    clientPhone,
     sessionName: data.packageLabel,
     date: data.selectedDate,
     location: data.location,
@@ -618,7 +671,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
 
   await notifyOwner(
     `🔔 *حجز جديد — واتساب*\n` +
-    `👤 العميل: ${data.clientName}\n📱 ${phone}\n` +
+    `👤 العميل: ${data.clientName}\n📱 ${clientPhone}\n` +
     `📅 ${formatDisplayDate(data.selectedDate)} — ${data.selectedTime}\n` +
     `📍 ${data.location}\n` +
     `📦 ${data.packageLabel} (${data.totalPrice} د.ل)\n` +
@@ -635,7 +688,7 @@ async function handleBookConfirm(ctx, text, data, notifyOwner) {
 
 async function startCancelFlow(ctx) {
   const { chatId, phone, send } = ctx;
-  const list = (await getSessionsByPhone(phone)).filter((s) => s.status !== "cancelled");
+  const list = (await getSessionsByPhone(phone, chatId)).filter((s) => s.status !== "cancelled");
   if (!list.length) {
     await send("لا توجد حجوزات نشطة مرتبطة برقمك.");
     return;
@@ -677,7 +730,7 @@ async function handleCancelConfirm(ctx, text, data, notifyOwner) {
 
 async function startRescheduleFlow(ctx) {
   const { chatId, phone, send } = ctx;
-  const list = (await getSessionsByPhone(phone)).filter((s) => s.status !== "cancelled");
+  const list = (await getSessionsByPhone(phone, chatId)).filter((s) => s.status !== "cancelled");
   if (!list.length) {
     await send("لا توجد حجوزات لتعديلها.");
     return;
@@ -740,9 +793,10 @@ async function handleRescheduleTime(ctx, text, data, notifyOwner) {
 }
 
 async function startPayFlow(ctx) {
-  const { chatId, phone, send } = ctx;
-  // Keep unpaid ledger internal — clients only see soft payment booking list (price only)
-  const invoices = (await getInvoicesByPhone(phone)).filter((i) => getAmountDue(i) > 0);
+  const { chatId, send } = ctx;
+  const chat = await getChatState(chatId);
+  const clientPhone = resolveClientPhone(ctx, chat?.data || {});
+  const invoices = (await getInvoicesByPhone(clientPhone)).filter((i) => getAmountDue(i) > 0);
   if (!invoices.length) {
     await send("ما عندناش حجز يحتاج دفع مرتبط برقمك حالياً. لو تبي تحجز جديد قول لي 😊");
     return;
@@ -804,7 +858,7 @@ async function handlePayAwaitReceipt(ctx, text, data, notifyOwner) {
 
 async function startTrackFlow(ctx) {
   const { chatId, phone, send } = ctx;
-  const list = (await getSessionsByPhone(phone)).filter((s) => s.status !== "cancelled");
+  const list = (await getSessionsByPhone(phone, chatId)).filter((s) => s.status !== "cancelled");
   if (!list.length) {
     await send("لا توجد جلسات لمتابعتها.");
     return;
