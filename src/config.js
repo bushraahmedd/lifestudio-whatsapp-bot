@@ -50,12 +50,12 @@ module.exports = {
       enabled: String(process.env.OLLAMA_ENABLED || "true").toLowerCase() !== "false",
       apiKey,
       baseUrl,
-      // Cloud models are hosted; local default stays small
+      // gpt-oss is OpenAI-style; qwen3.5 is stronger Arabic if you switch via env
       model:
         process.env.OLLAMA_MODEL
         || (isCloud || apiKey ? "gpt-oss:120b" : "qwen2.5:7b"),
-      temperature: Number(process.env.OLLAMA_TEMPERATURE) || 0.35,
-      timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS) || (isCloud || apiKey ? 60000 : 45000),
+      temperature: Number(process.env.OLLAMA_TEMPERATURE) || 0.65,
+      timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS) || (isCloud || apiKey ? 90000 : 45000),
     };
   })(),
 };

@@ -33,6 +33,10 @@ services:
         value: https://ollama.com
       - key: OLLAMA_MODEL
         value: gpt-oss:120b
+      - key: OLLAMA_TEMPERATURE
+        value: "0.65"
+      - key: OLLAMA_TIMEOUT_MS
+        value: "90000"
       # Set in Render Dashboard → Environment (do not commit the real key)
       - key: OLLAMA_API_KEY
         sync: false

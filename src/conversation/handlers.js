@@ -428,6 +428,14 @@ async function handleMainMenu(ctx, text, data) {
       return;
     }
     const cat = detected.categories[0];
+    // Prefer GPT-like Ollama reply (includes real package prices from context)
+    if (detected.reply && detected.source === "ollama") {
+      await send(detected.reply);
+      if (cat) {
+        await setChatState(chatId, STATES.MAIN_MENU, { ...data, lastCategory: cat });
+      }
+      return;
+    }
     if (cat) {
       await send(await buildCategoryHint(cat));
       await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: cat });

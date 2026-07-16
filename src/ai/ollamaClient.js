@@ -39,7 +39,8 @@ async function chat({
       stream: false,
       options: {
         temperature,
-        num_predict: 400,
+        num_predict: 700,
+        top_p: 0.9,
       },
     };
     if (format) body.format = format;
