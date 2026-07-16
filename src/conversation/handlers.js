@@ -44,9 +44,28 @@ const {
   isValidClientPhone,
   normalizeClientPhoneInput,
 } = require("../whatsapp/phoneUtils");
-const { analyzeWithOllama } = require("../ai/whatsappAgent");
+const { analyzeWithOllama, polishOutboundReply } = require("../ai/whatsappAgent");
 
 const STRONG_INTENTS = new Set(["book", "cancel", "pay", "track", "pricing", "human"]);
+
+/** Every client-facing message is phrased by Ollama (draft → polish). */
+function bindOllamaSend(ctx, stateHint = "") {
+  const rawSend = ctx.send.bind(ctx);
+  ctx.send = async (draft, opts = {}) => {
+    const text = String(draft || "").trim();
+    if (!text) return;
+    if (opts.fromOllama || opts.skipPolish) {
+      return rawSend(text);
+    }
+    const polished = await polishOutboundReply({
+      userText: ctx.body || "",
+      draft: text,
+      state: stateHint || ctx._ollamaState || "",
+    });
+    return rawSend(polished || text);
+  };
+  ctx.sendRaw = rawSend;
+}
 
 function mergeIntent(keyword, ai) {
   if (!ai) {
@@ -61,11 +80,11 @@ function mergeIntent(keyword, ai) {
     };
   }
 
+  // Ollama-only mode: trust the model for intent + reply
   let intent = ai.intent;
   let categories = ai.categories?.length ? ai.categories : (keyword.categories || []);
   let ambiguous = Boolean(ai.ambiguous);
 
-  // If the model is vague but keywords found an actionable intent, keep keywords
   if (
     (ai.intent === "chat" || ai.intent === "greeting")
     && keyword.intent
@@ -87,11 +106,11 @@ function mergeIntent(keyword, ai) {
     scores: keyword.scores,
     hall: keyword.hall,
     reply: ai.reply || null,
-    source: ai.source || "ollama",
+    source: "ollama",
   };
 }
 
-async function resolveMessageIntent(text, data) {
+async function resolveMessageIntent(text, data, extraContext = "") {
   const keyword = detectIntent(text);
   let packages = data.packages || [];
   if (!packages.length) {
@@ -106,10 +125,11 @@ async function resolveMessageIntent(text, data) {
     text,
     lastCategory: data.lastCategory || null,
     packages,
+    extraContext,
     fallbackReply: SOFT_HELP_TEXT,
   });
 
-  return mergeIntent(keyword, ai);
+  return { ...mergeIntent(keyword, ai), packages };
 }
 
 function isYes(text) {
@@ -249,19 +269,23 @@ async function handleSlotRequest(ctx, date, time, data) {
  * @param {function} ctx.notifyOwner - async (text) => void
  */
 async function handleIncomingMessage(ctx) {
-  const { chatId, phone, body, send, notifyOwner } = ctx;
+  const { chatId, phone, body, notifyOwner } = ctx;
   const text = (body || "").trim();
 
   if (!text) return;
 
   await logWhatsAppEvent({ chatId, phone, direction: "in", message: text });
 
+  let chat = await getChatState(chatId);
+  ctx._ollamaState = chat?.state || STATES.MAIN_MENU;
+  // All client replies go through Ollama phrasing
+  bindOllamaSend(ctx, ctx._ollamaState);
+  const { send } = ctx;
+
   // Resume bot anytime
   if (wantsBotResume(text)) {
     return resumeBot(ctx);
   }
-
-  let chat = await getChatState(chatId);
 
   // Human takeover — bot stays silent (staff finishes with client)
   if (chat?.state === STATES.HUMAN_TAKEOVER) {
@@ -275,14 +299,16 @@ async function handleIncomingMessage(ctx) {
 
   if (isBack(text)) {
     await clearChatState(chatId);
-    await send(MAIN_MENU_TEXT);
+    const detected = await resolveMessageIntent(text, {});
+    await send(
+      detected.reply || "تمام، رجّعناك للبداية. شنو تبي نخدمك فيه؟",
+      { fromOllama: Boolean(detected.reply) }
+    );
     await setChatState(chatId, STATES.MAIN_MENU, {});
     return;
   }
 
   if (!chat) {
-    const botConfig = await getBotConfig();
-    await send(`${botConfig.greeting}\n\n${MAIN_MENU_TEXT}`);
     await setChatState(chatId, STATES.MAIN_MENU, {});
     chat = { state: STATES.MAIN_MENU, data: {} };
   }
@@ -292,6 +318,7 @@ async function handleIncomingMessage(ctx) {
   if (isValidClientPhone(phone)) {
     data = { ...data, clientPhone: normalizeClientPhoneInput(phone) };
   }
+  ctx._ollamaState = state;
 
   try {
     switch (state) {
@@ -339,7 +366,8 @@ async function handleIncomingMessage(ctx) {
         return handleTrackPick(ctx, text, data);
       default:
         await clearChatState(chatId);
-        await send(MAIN_MENU_TEXT);
+        const detected = await resolveMessageIntent(text, data);
+        await send(detected.reply || MAIN_MENU_TEXT, { fromOllama: Boolean(detected.reply) });
         await setChatState(chatId, STATES.MAIN_MENU, {});
     }
   } catch (err) {
@@ -352,6 +380,7 @@ async function handleMainMenu(ctx, text, data) {
   const { chatId, send } = ctx;
   const choice = normalizeInput(text);
 
+  // Fast structured actions that still need real slot/package data — Ollama phrases the reply
   const parsed = parseDateTime(text);
   if (parsed.date && parsed.time) {
     return handleSlotRequest(ctx, parsed.date, parsed.time, data);
@@ -376,100 +405,74 @@ async function handleMainMenu(ctx, text, data) {
     return;
   }
 
-  const matched = await matchSinglePackage(text);
-  if (matched) {
-    await send(await buildSinglePackageReply(matched.package, matched.category));
-    await setChatState(chatId, STATES.MAIN_MENU, {
-      ...data,
-      lastCategory: matched.category,
-      selectedPackageId: matched.package.id,
-      packageLabel: matched.package.label,
-      totalPrice: matched.package.price || 0,
-      packages: [matched.package],
-    });
-    return;
+  if (choice === "1" || choice === "حجز") {
+    return startBookFlow(ctx, { serviceCategory: data.lastCategory, packages: data.packages });
   }
-
-  if (choice === "1" || choice === "حجز") return startBookFlow(ctx, { serviceCategory: data.lastCategory, packages: data.packages });
   if (choice === "2" || choice === "الغاء" || choice === "إلغاء") return startCancelFlow(ctx);
   if (choice === "3" || choice === "تغيير") return startRescheduleFlow(ctx);
   if (choice === "4" || choice === "دفع") return startPayFlow(ctx);
   if (choice === "5" || choice === "متابعة") return startTrackFlow(ctx);
 
-  // Ollama agent for natural Libyan replies + better intent (keyword fallback inside)
-  const detected = await resolveMessageIntent(text, data);
-
-  if (detected.intent === "human") {
-    return startHumanTakeover(ctx, data);
+  // Build facts for Ollama (prices + availability) — Ollama is the only voice
+  const matched = await matchSinglePackage(text);
+  let days = [];
+  try {
+    days = await getAvailability();
+  } catch {
+    days = [];
+  }
+  const availLines = days.slice(0, 8).map(
+    (d, i) => `${i + 1}) ${d.label} (${formatDisplayDate(d.date)}) — ${d.slots.length} موعد`
+  );
+  const extraBits = [];
+  if (matched) {
+    extraBits.push(
+      `باقة مطابقة: ${matched.package.label} — ${Number(matched.package.price || 0).toLocaleString()} د.ل (فئة ${matched.category})`
+    );
+  }
+  if (availLines.length) {
+    extraBits.push(`مواعيد فاضية:\n${availLines.join("\n")}`);
   }
 
-  if (detected.intent === "greeting" || /^(مرحبا|السلام|هلا|hello|hi|أهلا|اهلا|مساعدة|help)/.test(choice)) {
-    if (detected.reply && detected.source === "ollama" && detected.intent === "greeting") {
-      await send(detected.reply);
-      return;
+  const detected = await resolveMessageIntent(text, data, extraBits.join("\n\n"));
+
+  if (detected.intent === "human") {
+    if (detected.reply) await send(detected.reply, { fromOllama: true });
+    else await send(HUMAN_HANDOFF_TEXT);
+    await setChatState(chatId, STATES.HUMAN_TAKEOVER, { ...data, humanSince: new Date().toISOString() }, HUMAN_TTL_MS);
+    try {
+      await ctx.notifyOwner?.(
+        `👤 *طلب موظف — البوت متوقف*\n📱 ${ctx.phone}\nالدردشة: ${chatId}`
+      );
+    } catch {
+      // ignore
     }
-    const botConfig = await getBotConfig();
-    await send(`${botConfig.greeting}\n\n${MAIN_MENU_TEXT}`);
     return;
   }
 
+  // Structured flows: facts come from code, wording always polished by Ollama via ctx.send
   if (detected.intent === "cancel") return startCancelFlow(ctx);
   if (detected.intent === "pay") return startPayFlow(ctx);
   if (detected.intent === "track") return startTrackFlow(ctx);
-
-  if (detected.intent === "pricing") {
-    if (detected.ambiguous) {
-      if (detected.reply && detected.source === "ollama") {
-        await send(detected.reply);
-      } else {
-        await send(await buildAmbiguousClarifier(detected.categories));
-      }
-      await setChatState(chatId, STATES.INTENT_CLARIFY, { pendingCategories: detected.categories });
-      return;
-    }
-    const cat = detected.categories[0];
-    // Prefer GPT-like Ollama reply (includes real package prices from context)
-    if (detected.reply && detected.source === "ollama") {
-      await send(detected.reply);
-      if (cat) {
-        await setChatState(chatId, STATES.MAIN_MENU, { ...data, lastCategory: cat });
-      }
-      return;
-    }
-    if (cat) {
-      await send(await buildCategoryHint(cat));
-      await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: cat });
-      return;
-    }
-  }
-
   if (detected.intent === "book" || (isAffirmative(text) && (data.lastCategory || data.selectedPackageId))) {
     const cat = detected.categories[0] || data.lastCategory || null;
     return startBookFlow(ctx, {
       serviceCategory: cat,
-      packages: data.packages,
+      packages: data.packages || detected.packages,
       selectedPackageId: data.selectedPackageId,
       packageLabel: data.packageLabel,
       totalPrice: data.totalPrice,
     });
   }
 
-  if (detected.categories.length === 1) {
-    await send(await buildCategoryHint(detected.categories[0]));
-    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: detected.categories[0] });
-    return;
+  // Everything else: Ollama is the only answer (no templates)
+  if (detected.reply && detected.source === "ollama") {
+    await send(detected.reply, { fromOllama: true });
+  } else {
+    await send(detected.reply || SOFT_HELP_TEXT);
   }
 
-  // Smooth free-form reply from Ollama instead of stiff template
-  await send(detected.reply || SOFT_HELP_TEXT);
-}
-
-async function handleIntentClarify(ctx, text, data) {
-  const { chatId, send } = ctx;
-
-  const matched = await matchSinglePackage(text);
   if (matched) {
-    await send(await buildSinglePackageReply(matched.package, matched.category));
     await setChatState(chatId, STATES.MAIN_MENU, {
       ...data,
       lastCategory: matched.category,
@@ -481,27 +484,71 @@ async function handleIntentClarify(ctx, text, data) {
     return;
   }
 
-  const detected = await resolveMessageIntent(text, data);
+  if (detected.intent === "pricing" && detected.ambiguous) {
+    await setChatState(chatId, STATES.INTENT_CLARIFY, {
+      ...data,
+      pendingCategories: detected.categories,
+    });
+    return;
+  }
+
+  const cat = detected.categories[0] || null;
+  if (cat) {
+    await setChatState(chatId, STATES.MAIN_MENU, { ...data, lastCategory: cat });
+  }
+}
+
+async function handleIntentClarify(ctx, text, data) {
+  const { chatId, send } = ctx;
+
+  const matched = await matchSinglePackage(text);
+  const detected = await resolveMessageIntent(
+    text,
+    data,
+    matched
+      ? `باقة مطابقة: ${matched.package.label} — ${Number(matched.package.price || 0).toLocaleString()} د.ل`
+      : `فئات معلّقة: ${(data.pendingCategories || []).join(", ")}`
+  );
 
   if (detected.intent === "book" || isAffirmative(text)) {
     const cat = detected.categories[0] || data.pendingCategories?.[0] || null;
     return startBookFlow(ctx, { serviceCategory: cat, packages: data.packages });
   }
 
-  if (detected.categories.length === 1) {
-    await send(await buildCategoryHint(detected.categories[0]));
-    await setChatState(chatId, STATES.MAIN_MENU, { lastCategory: detected.categories[0] });
-    return;
-  }
-
   if (detected.reply && detected.source === "ollama") {
-    await send(detected.reply);
+    await send(detected.reply, { fromOllama: true });
+  } else {
+    await send(
+      detected.reply
+      || (await buildAmbiguousClarifier(
+        detected.categories.length ? detected.categories : ["wedding", "graduation", "birthday"]
+      ))
+    );
+  }
+
+  if (matched) {
+    await setChatState(chatId, STATES.MAIN_MENU, {
+      ...data,
+      lastCategory: matched.category,
+      selectedPackageId: matched.package.id,
+      packageLabel: matched.package.label,
+      totalPrice: matched.package.price || 0,
+      packages: [matched.package],
+    });
     return;
   }
 
-  await send(await buildAmbiguousClarifier(
-    detected.categories.length ? detected.categories : ["wedding", "graduation", "birthday"]
-  ));
+  if (detected.categories.length === 1) {
+    await setChatState(chatId, STATES.MAIN_MENU, { ...data, lastCategory: detected.categories[0] });
+    return;
+  }
+
+  await setChatState(chatId, STATES.INTENT_CLARIFY, {
+    ...data,
+    pendingCategories: detected.categories.length
+      ? detected.categories
+      : data.pendingCategories || ["wedding", "graduation", "birthday"],
+  });
 }
 
 async function startBookFlow(ctx, opts = {}) {

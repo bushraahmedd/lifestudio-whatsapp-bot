@@ -152,6 +152,7 @@ async function analyzeWithOllama({
   text,
   lastCategory = null,
   packages = [],
+  extraContext = "",
   fallbackReply = "",
 }) {
   const ai = config.ollama;
@@ -167,9 +168,10 @@ async function analyzeWithOllama({
     "سياق الاستوديو:",
     buildPackageContext(packages),
     lastCategory ? `آخر فئة اهتم بها العميل: ${lastCategory}` : "ما في فئة سابقة.",
+    extraContext ? `\nمعلومات إضافية مؤكدة (استخدمها كما هي):\n${extraContext}` : "",
     "",
     `رسالة العميل: ${text}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   try {
     const content = await chat({
@@ -189,6 +191,54 @@ async function analyzeWithOllama({
   } catch (err) {
     console.warn("[ollama] analyze failed:", err.message || err);
     return null;
+  }
+}
+
+const POLISH_PROMPT = `أنت كاتب ردود واتساب لاستوديو "لايف استوديو" في ليبيا.
+أعد صياغة المسودة التالية بأسلوب ChatGPT الطبيعي واللهجة الليبية الودودة.
+قواعد صارمة:
+- حافظ على كل الحقائق كما هي: الأسعار، التواريخ، الأوقات، الأرقام، أسماء الباقات، روابط، وخيارات 1/2/3.
+- لا تضف أسعاراً أو مواعيد غير موجودة في المسودة.
+- رد بنص الرسالة النهائي فقط (بدون JSON وبدون شرح).
+- طول مناسب لواتساب (قصير إلى متوسط).`;
+
+/**
+ * Rewrite any outbound draft so the client only ever sees Ollama phrasing.
+ * Falls back to the draft if Ollama is unavailable.
+ */
+async function polishOutboundReply({ userText = "", draft = "", state = "" }) {
+  const ai = config.ollama;
+  if (!ai?.enabled || !draft || !String(draft).trim()) return draft;
+
+  const reachable = await isReachable(ai.baseUrl, ai.apiKey, 3000);
+  if (!reachable) return draft;
+
+  try {
+    const content = await chat({
+      baseUrl: ai.baseUrl,
+      apiKey: ai.apiKey,
+      model: ai.model,
+      temperature: Math.min(0.75, (ai.temperature || 0.65) + 0.05),
+      timeoutMs: ai.timeoutMs,
+      messages: [
+        { role: "system", content: POLISH_PROMPT },
+        {
+          role: "user",
+          content: [
+            state ? `حالة المحادثة: ${state}` : "",
+            userText ? `رسالة العميل: ${userText}` : "",
+            "مسودة الرد (أعد صياغتها):",
+            draft,
+          ].filter(Boolean).join("\n"),
+        },
+      ],
+    });
+    const polished = String(content || "").trim();
+    if (!polished || polished.length < 2) return draft;
+    return polished.slice(0, 2000);
+  } catch (err) {
+    console.warn("[ollama] polish failed:", err.message || err);
+    return draft;
   }
 }
 
@@ -224,6 +274,7 @@ async function checkOllamaHealth() {
 
 module.exports = {
   analyzeWithOllama,
+  polishOutboundReply,
   generateSmoothReply,
   checkOllamaHealth,
   sanitizeAgentResult,
