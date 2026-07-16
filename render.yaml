@@ -27,3 +27,12 @@ services:
         value: "218926128650,218945068428"
       - key: APP_URL
         value: https://lifestudio-abf4b.web.app
+      - key: OLLAMA_ENABLED
+        value: "true"
+      - key: OLLAMA_BASE_URL
+        value: https://ollama.com
+      - key: OLLAMA_MODEL
+        value: gpt-oss:120b
+      # Set in Render Dashboard → Environment (do not commit the real key)
+      - key: OLLAMA_API_KEY
+        sync: false

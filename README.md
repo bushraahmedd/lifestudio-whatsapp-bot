@@ -79,6 +79,39 @@ life/
 
 ## 3. Step-by-step setup
 
+### Ollama AI agent (smoother WhatsApp replies)
+
+Uses **Ollama Cloud** by default — no local install. Booking / pay / cancel stay rule-based so prices and slots stay correct.
+
+**Recommended — Ollama Cloud (server, no install)**
+
+1. Create an account → API key: https://ollama.com/settings/keys  
+2. Set in `.env` (or Render Environment):
+
+```env
+OLLAMA_ENABLED=true
+OLLAMA_API_KEY=your_key_here
+# optional — auto-set to https://ollama.com when key is present
+# OLLAMA_BASE_URL=https://ollama.com
+OLLAMA_MODEL=gpt-oss:120b
+```
+
+3. Restart the bot. Check `GET /api/health` → `ollama.ok: true`, `ollama.cloud: true`.
+
+On Render: Dashboard → Environment → paste `OLLAMA_API_KEY` → Save / Redeploy.
+
+**Optional — your own VPS Ollama**
+
+```env
+OLLAMA_BASE_URL=https://your-vps-host:11434
+OLLAMA_API_KEY=
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+If Ollama is unreachable, the bot falls back to keyword matching.
+
+---
+
 ### Step 1 — Firebase service account
 
 1. Firebase Console → Project **lifestudio-abf4b** → Settings → Service accounts  
